@@ -10,13 +10,14 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from types import SimpleNamespace
+
 from app.core.logging import get_logger
-from app.core.security import encrypt_api_key, decrypt_api_key
+from app.core.security import decrypt_api_key
+from app.core.settings_db import ensure_settings_config
 from app.models import (
     GradingHistory,
     GradingTemplate,
-    AIProviderConfig,
-    Teacher,
     DEFAULT_TEACHER_ID,
 )
 from app.services.ai_providers.factory import get_provider
@@ -143,43 +144,21 @@ class EssayGradingService:
         logger.info(f"Grading completed: {grading_record.id}")
         return grading_record
 
-    def _get_ai_config(self, teacher_id: int) -> AIProviderConfig:
+    def _get_ai_config(self, teacher_id: int) -> SimpleNamespace:
         """
-        Get teacher's AI config (default provider).
-
-        Args:
-            teacher_id: Teacher ID
+        Get AI config from Settings (type=ai-config). Used for essay grading.
 
         Returns:
-            AIProviderConfig
-
-        Raises:
-            ValueError: If no AI config found
+            Object with .provider, .api_key_encrypted, .model
         """
-        config = (
-            self.db.query(AIProviderConfig)
-            .filter(
-                AIProviderConfig.teacher_id == teacher_id,
-                AIProviderConfig.is_default == True,
-            )
-            .first()
+        rec = ensure_settings_config(self.db)
+        cfg = rec.config or {}
+        api_key = cfg.get("api_key") or ""
+        return SimpleNamespace(
+            provider=cfg.get("provider", "openai"),
+            api_key_encrypted=api_key,
+            model=cfg.get("model", "gpt-4o"),
         )
-
-        if not config:
-            # Try to get any config for this teacher
-            config = (
-                self.db.query(AIProviderConfig)
-                .filter(AIProviderConfig.teacher_id == teacher_id)
-                .first()
-            )
-
-        if not config:
-            raise ValueError(
-                f"No AI configuration found for teacher {teacher_id}. "
-                "Please configure an AI provider first."
-            )
-
-        return config
 
     def _get_requirements(self, template_id: str, additional: Optional[str]) -> str:
         """

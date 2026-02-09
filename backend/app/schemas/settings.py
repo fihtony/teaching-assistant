@@ -63,6 +63,25 @@ class TestConnectionRequest(BaseModel):
     api_key: Optional[str] = None
 
 
+class AIProviderUpdate(BaseModel):
+    """Request to save only AI provider config (no extra fields)."""
+
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+
+
+class GetModelsRequest(BaseModel):
+    """Request to fetch available models from a provider (uses user's base_url and api_key)."""
+
+    provider: str = Field(..., description="Provider: openai, anthropic, google, gemini, zhipuai, copilot")
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+
+
 class TestConnectionResponse(BaseModel):
     """Response from testing connection to a provider."""
 

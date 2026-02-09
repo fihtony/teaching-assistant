@@ -9,8 +9,8 @@ from typing import Optional, List, Tuple
 
 from sqlalchemy.orm import Session
 
-from app.core.config import get_config
 from app.core.logging import get_logger
+from app.core.settings_db import ensure_greeting_config
 from app.core.security import decrypt_api_key
 from app.models import (
     CachedArticle,
@@ -42,7 +42,6 @@ class GreetingService:
 
     def __init__(self, db: Session):
         self.db = db
-        self.config = get_config()
         self._litellm = None
 
     def _get_litellm(self):
@@ -60,7 +59,8 @@ class GreetingService:
         Returns:
             List of cached articles from recent sessions.
         """
-        lookback_days = self.config.greeting.lookback_days
+        rec = ensure_greeting_config(self.db)
+        lookback_days = (rec.config or {}).get("lookback_days", 30)
         cutoff_date = datetime.utcnow() - timedelta(days=lookback_days)
 
         # Get grading contexts from recent period
@@ -97,7 +97,8 @@ class GreetingService:
         Returns:
             List of recent greeting texts.
         """
-        no_repeat_hours = self.config.greeting.no_repeat_hours
+        rec = ensure_greeting_config(self.db)
+        no_repeat_hours = (rec.config or {}).get("no_repeat_hours", 24)
         cutoff_time = datetime.utcnow() - timedelta(hours=no_repeat_hours)
 
         recent = (

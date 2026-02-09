@@ -7,7 +7,6 @@ from datetime import datetime, timedelta
 from sqlalchemy import Column, Integer, String, Text, Boolean
 
 from app.core.database import Base
-from app.core.config import get_config
 from app.core.datetime_utils import get_now_with_timezone
 
 
@@ -54,9 +53,8 @@ class CachedArticle(Base):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         if "expires_at" not in kwargs or kwargs["expires_at"] is None:
-            config = get_config()
-            cache_days = config.article_cache.cache_days
-            expires_dt = get_now_with_timezone() + timedelta(days=cache_days)
+            # Default 30 days; callers should pass expires_at from Settings type=cache
+            expires_dt = get_now_with_timezone() + timedelta(days=30)
             self.expires_at = expires_dt.isoformat()
 
     def is_cache_valid(self) -> bool:

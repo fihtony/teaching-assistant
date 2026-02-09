@@ -21,28 +21,4 @@ logging:
   max_size: 10
   backup_count: 5
 
-ai:
-  default_provider: "zhipuai"
-  default_model: "GLM-4.7"
-  timeout: 60
-  max_retries: 3
 
-search:
-  engine: "duckduckgo"
-  max_results: 10
-  cache_days: 7
-
-article_cache:
-  cache_days: 30
-  max_articles: 1000
-
-greeting:
-  lookback_days: 30
-  no_repeat_hours: 24
-
-ocr:
-  engine: "easyocr"
-  languages:
-    - "en"
-    - "ch_sim"
-  gpu: false

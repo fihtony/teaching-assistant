@@ -3,7 +3,8 @@
  */
 
 import React, { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { useNotification } from "@/contexts";
 import { settingsApi } from "@/services/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,7 +15,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Save, User, Brain, Search, Eye, EyeOff } from "lucide-react";
 
 export function SettingsPage() {
-  const queryClient = useQueryClient();
+  const { show: showNotification } = useNotification();
   const [showApiKey, setShowApiKey] = useState(false);
   const [availableModels, setAvailableModels] = useState<(string | { name: string; vendor: string; id: string })[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
@@ -40,92 +41,161 @@ export function SettingsPage() {
   // Search engine state
   const [searchEngine, setSearchEngine] = useState("duckduckgo");
 
-  // Load data
+  // Last-saved values: save buttons enabled only when form is dirty
+  const [lastSavedProfile, setLastSavedProfile] = useState<typeof profile | null>(null);
+  const [lastSavedAiConfig, setLastSavedAiConfig] = useState<{
+    provider: string;
+    model: string;
+    base_url: string;
+    temperature: number;
+    max_tokens: number;
+  } | null>(null);
+  const [lastSavedSearchEngine, setLastSavedSearchEngine] = useState<string | null>(null);
+
+  // Load data: only two endpoints - settings (AI + search_engine) and teacher-profile
   const { data: profileData, isLoading: profileLoading } = useQuery({
     queryKey: ["teacher-profile"],
     queryFn: settingsApi.getTeacherProfile,
+    refetchOnMount: "always",
+    staleTime: 0,
   });
 
-  const { data: aiConfigData, isLoading: aiConfigLoading } = useQuery({
-    queryKey: ["ai-config"],
-    queryFn: settingsApi.getAIConfig,
+  const { data: settingsData, isLoading: settingsLoading } = useQuery({
+    queryKey: ["settings"],
+    queryFn: settingsApi.getSettings,
+    refetchOnMount: "always",
+    staleTime: 0,
   });
 
-  const { data: searchEngineData, isLoading: searchEngineLoading } = useQuery({
-    queryKey: ["search-engine"],
-    queryFn: settingsApi.getSearchEngine,
-  });
-
-  // Mutations (定义在前面，这样 useEffect 可以使用它们)
+  // Mutations: no invalidate on success; update lastSaved so save button goes grey again
   const profileMutation = useMutation({
     mutationFn: settingsApi.updateTeacherProfile,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["teacher-profile"] });
+    onSuccess: (_data, variables) => {
+      setLastSavedProfile(variables);
+      showNotification({ type: "success", message: "Profile saved successfully." });
+    },
+    onError: (err: Error) => {
+      showNotification({ type: "error", message: err.message || "Failed to save profile." });
     },
   });
 
   const aiConfigMutation = useMutation({
-    mutationFn: settingsApi.updateAIConfig,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["ai-config"] });
+    mutationFn: (payload: {
+      provider?: string;
+      model?: string;
+      base_url?: string;
+      api_key?: string;
+      temperature?: number;
+      max_tokens?: number;
+    }) => settingsApi.updateAIProvider(payload),
+    onSuccess: (_data, _variables) => {
+      setLastSavedAiConfig({
+        provider: aiConfig.provider,
+        model: aiConfig.model,
+        base_url: aiConfig.base_url,
+        temperature: aiConfig.temperature,
+        max_tokens: aiConfig.max_tokens,
+      });
+      setAiConfig((c) => ({ ...c, api_key: "" }));
+      showNotification({ type: "success", message: "AI config saved successfully." });
+    },
+    onError: (err: Error) => {
+      showNotification({ type: "error", message: err.message || "Failed to save AI config." });
     },
   });
 
   const searchEngineMutation = useMutation({
     mutationFn: (engine: string) => settingsApi.updateSearchEngine(engine),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["search-engine"] });
+    onSuccess: (_data, variables) => {
+      setLastSavedSearchEngine(variables);
+      showNotification({ type: "success", message: "Search settings saved successfully." });
+    },
+    onError: (err: Error) => {
+      showNotification({ type: "error", message: err.message || "Failed to save search settings." });
     },
   });
 
   React.useEffect(() => {
     if (profileData) {
-      setProfile({
+      const p = {
         name: profileData.name || "",
         email: profileData.email || "",
         avatar_url: profileData.avatar_url || "",
         bio: profileData.bio || "",
-      });
+      };
+      setProfile(p);
+      setLastSavedProfile(p);
     }
   }, [profileData]);
 
   React.useEffect(() => {
-    if (profileMutation.isSuccess) {
-      queryClient.invalidateQueries({ queryKey: ["teacher-profile"] });
-    }
-  }, [profileMutation.isSuccess, queryClient]);
-
-  React.useEffect(() => {
-    if (aiConfigData) {
+    if (settingsData) {
+      const d = settingsData as Record<string, unknown>;
+      const provider = (d.provider ?? d.default_provider) as string || "openai";
+      const model = (d.model ?? d.default_model) as string || "gpt-4";
+      const base_url = (d.base_url ?? d.api_base_url) as string || "";
+      const temperature = (d.temperature as number) ?? 0.7;
+      const max_tokens = (d.max_tokens as number) ?? 4096;
+      const search_engine = (d.search_engine as string) || "duckduckgo";
       setAiConfig({
-        provider: aiConfigData.provider || "openai",
-        model: aiConfigData.model || "gpt-4",
-        api_key: aiConfigData.api_key || "",
-        base_url: aiConfigData.base_url || "",
-        temperature: aiConfigData.temperature || 0.7,
-        max_tokens: aiConfigData.max_tokens || 4096,
+        provider,
+        model,
+        api_key: "",
+        base_url,
+        temperature,
+        max_tokens,
       });
+      setSearchEngine(search_engine);
+      setLastSavedAiConfig({ provider, model, base_url, temperature, max_tokens });
+      setLastSavedSearchEngine(search_engine);
     }
-  }, [aiConfigData]);
+  }, [settingsData]);
 
-  React.useEffect(() => {
-    if (searchEngineData) {
-      setSearchEngine(searchEngineData.engine || "duckduckgo");
-    }
-  }, [searchEngineData]);
+  const isProfileDirty =
+    lastSavedProfile == null ||
+    profile.name !== lastSavedProfile.name ||
+    profile.email !== lastSavedProfile.email ||
+    profile.avatar_url !== lastSavedProfile.avatar_url ||
+    profile.bio !== lastSavedProfile.bio;
 
-  React.useEffect(() => {
-    if (aiConfigMutation.isSuccess) {
-      queryClient.invalidateQueries({ queryKey: ["ai-config"] });
-    }
-  }, [aiConfigMutation.isSuccess, queryClient]);
+  const isAiConfigDirty =
+    lastSavedAiConfig == null ||
+    aiConfig.provider !== lastSavedAiConfig.provider ||
+    aiConfig.model !== lastSavedAiConfig.model ||
+    aiConfig.base_url !== lastSavedAiConfig.base_url ||
+    aiConfig.temperature !== lastSavedAiConfig.temperature ||
+    aiConfig.max_tokens !== lastSavedAiConfig.max_tokens ||
+    aiConfig.api_key !== "";
+
+  const isSearchEngineDirty =
+    lastSavedSearchEngine == null || searchEngine !== lastSavedSearchEngine;
+
+  // Get Models button: (a) Copilot -> enable if base_url not empty; (b) non-Copilot -> enable if base_url and api_key both not empty; (c) saved config for current provider -> enable if base_url not empty
+  const settings = settingsData as unknown as Record<string, unknown> | undefined;
+  const savedProvider =
+    settings && (settings.default_provider ?? settings.provider);
+  const isSavedConfigForProvider =
+    !!settings && String(savedProvider) === aiConfig.provider;
+  const getModelsDisabled =
+    isLoadingModels ||
+    !aiConfig.base_url?.trim() ||
+    (aiConfig.provider !== "copilot" &&
+      !isSavedConfigForProvider &&
+      !aiConfig.api_key?.trim());
 
   const handleSaveProfile = () => {
     profileMutation.mutate(profile);
   };
 
   const handleSaveAIConfig = () => {
-    aiConfigMutation.mutate(aiConfig);
+    aiConfigMutation.mutate({
+      provider: aiConfig.provider,
+      model: aiConfig.model,
+      base_url: aiConfig.base_url || undefined,
+      api_key: aiConfig.api_key || undefined,
+      temperature: aiConfig.temperature,
+      max_tokens: aiConfig.max_tokens,
+    });
   };
 
   const handleSaveSearchEngine = () => {
@@ -133,29 +203,39 @@ export function SettingsPage() {
   };
 
   const handleGetModels = async () => {
-    if (!aiConfig.base_url && aiConfig.provider !== "copilot") {
-      alert("Please enter a Base URL first");
+    const needBaseUrl = aiConfig.provider !== "copilot";
+    if (needBaseUrl && !aiConfig.base_url?.trim()) {
+      showNotification({ type: "warning", message: "Please enter a Base URL first." });
       return;
     }
-
-    if (aiConfig.provider !== "copilot" && !aiConfig.api_key) {
-      alert("Please enter an API Key first");
-      return;
-    }
-
     setIsLoadingModels(true);
     try {
-      const models = await settingsApi.getModels(aiConfig.provider, aiConfig.base_url);
-      setAvailableModels(models);
+      const result = await settingsApi.getModels(
+        aiConfig.provider,
+        aiConfig.base_url,
+        aiConfig.api_key || undefined
+      );
+      setAvailableModels(result.models);
+      if (result.error) {
+        showNotification({ type: "error", message: result.error });
+      } else if (result.models.length > 0) {
+        showNotification({
+          type: "success",
+          message: `Loaded ${result.models.length} model(s).`,
+        });
+      }
     } catch (error) {
       console.error("Failed to fetch models:", error);
-      alert("Failed to fetch models. Please check your settings.");
+      showNotification({
+        type: "error",
+        message: "Failed to fetch models. Please check your settings.",
+      });
     } finally {
       setIsLoadingModels(false);
     }
   };
 
-  if (profileLoading || aiConfigLoading || searchEngineLoading) {
+  if (profileLoading || settingsLoading) {
     return (
       <div className="flex h-64 items-center justify-center">
         <p className="text-gray-500">Loading settings...</p>
@@ -231,7 +311,11 @@ export function SettingsPage() {
           </div>
 
           <div className="flex justify-end">
-            <Button onClick={handleSaveProfile} disabled={profileMutation.isPending}>
+            <Button
+              onClick={handleSaveProfile}
+              disabled={!isProfileDirty || profileMutation.isPending}
+              variant={isProfileDirty ? "default" : "secondary"}
+            >
               <Save className="mr-2 h-4 w-4" />
               {profileMutation.isPending ? "Saving..." : "Save Profile"}
             </Button>
@@ -260,33 +344,37 @@ export function SettingsPage() {
                   const newProvider = e.target.value;
                   let newBaseUrl = aiConfig.base_url;
 
-                  // Auto-populate base_url based on provider if empty
+                  // Auto-populate base_url based on provider (from ai-provider skills)
+                  const defaultUrls: Record<string, string> = {
+                    openai: "https://api.openai.com/v1",
+                    anthropic: "https://api.anthropic.com",
+                    google: "https://generativelanguage.googleapis.com/v1beta/openai",
+                    gemini: "https://generativelanguage.googleapis.com/v1beta/openai",
+                    zhipuai: "https://open.bigmodel.cn/api/coding/paas/v4",
+                    copilot: "http://localhost:1287",
+                  };
                   if (
                     !aiConfig.base_url ||
-                    aiConfig.base_url === "https://api.openai.com/v1" ||
-                    aiConfig.base_url === "https://api.anthropic.com" ||
-                    aiConfig.base_url === "https://generativelanguage.googleapis.com" ||
-                    aiConfig.base_url === "http://localhost:1287"
+                    Object.values(defaultUrls).includes(aiConfig.base_url)
                   ) {
-                    if (newProvider === "openai") {
-                      newBaseUrl = "https://api.openai.com/v1";
-                    } else if (newProvider === "anthropic") {
-                      newBaseUrl = "https://api.anthropic.com";
-                    } else if (newProvider === "google") {
-                      newBaseUrl = "https://generativelanguage.googleapis.com";
-                    } else if (newProvider === "copilot") {
-                      newBaseUrl = "http://localhost:1287";
-                    }
+                    newBaseUrl = defaultUrls[newProvider] ?? aiConfig.base_url;
                   }
 
-                  setAiConfig((c) => ({ ...c, provider: newProvider, base_url: newBaseUrl }));
+                  setAiConfig((c) => ({
+                    ...c,
+                    provider: newProvider,
+                    base_url: newBaseUrl,
+                    api_key: "",
+                    model: "", // Clear model when switching provider
+                  }));
                   setAvailableModels([]);
                 }}
                 className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
               >
                 <option value="openai">OpenAI</option>
                 <option value="anthropic">Anthropic</option>
-                <option value="google">Google</option>
+                <option value="google">Google Gemini</option>
+                <option value="zhipuai">ZhipuAI (智谱AI)</option>
                 <option value="copilot">Copilot Bridge</option>
               </select>
             </div>
@@ -302,10 +390,11 @@ export function SettingsPage() {
                     : aiConfig.provider === "anthropic"
                       ? "https://api.anthropic.com"
                       : aiConfig.provider === "google"
-                        ? "https://generativelanguage.googleapis.com"
-                        : "http://localhost:1287"
+                        ? "https://generativelanguage.googleapis.com/v1beta/openai"
+                        : aiConfig.provider === "zhipuai"
+                          ? "https://open.bigmodel.cn/api/coding/paas/v4"
+                          : "http://localhost:1287"
                 }
-                className="mt-1"
               />
             </div>
           </div>
@@ -326,7 +415,13 @@ export function SettingsPage() {
                 type={showApiKey ? "text" : "password"}
                 value={aiConfig.api_key}
                 onChange={(e) => setAiConfig((c) => ({ ...c, api_key: e.target.value }))}
-                placeholder={aiConfig.provider === "copilot" ? "(Not required for Copilot Bridge)" : "sk-..."}
+                placeholder={
+                  aiConfig.provider === "copilot"
+                    ? "(Not required for Copilot Bridge)"
+                    : settingsData
+                      ? "Leave empty to keep current key; enter new key to change"
+                      : "Enter your API key"
+                }
                 className="pr-10"
               />
               <Button
@@ -349,17 +444,17 @@ export function SettingsPage() {
                 id="model"
                 value={aiConfig.model}
                 onChange={(e) => setAiConfig((c) => ({ ...c, model: e.target.value }))}
-                className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                disabled={availableModels.length === 0}
+                className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:bg-gray-100 disabled:cursor-not-allowed"
               >
                 <option value="">-- Select a model --</option>
                 {availableModels.length > 0 ? (
                   availableModels.map((m, idx) => {
-                    // Handle both string and object formats
-                    const modelId = typeof m === "string" ? m : (m as any).id || (m as any).name;
-                    const modelName = typeof m === "string" ? m : (m as any).name;
+                    const modelId = typeof m === "string" ? m : (m as { id?: string; name?: string }).id ?? (m as { name?: string }).name ?? "";
+                    const modelName = typeof m === "string" ? m : (m as { name?: string; id?: string }).name ?? (m as { id?: string }).id ?? modelId;
                     return (
                       <option key={`${modelId}-${idx}`} value={modelId}>
-                        {modelName}
+                        {modelName || modelId}
                       </option>
                     );
                   })
@@ -369,14 +464,12 @@ export function SettingsPage() {
               </select>
             </div>
             <div className="flex flex-col justify-end">
+              {/* Get Models button background: edit className below (bg-slate-200, hover:bg-slate-300) */}
               <Button
                 onClick={handleGetModels}
-                disabled={
-                  isLoadingModels ||
-                  (!aiConfig.base_url && aiConfig.provider !== "copilot") ||
-                  (aiConfig.provider !== "copilot" && !aiConfig.api_key)
-                }
-                variant="outline"
+                disabled={getModelsDisabled}
+                variant="secondary"
+                className="bg-slate-200 hover:bg-slate-300 text-slate-800 border border-slate-300"
               >
                 {isLoadingModels ? "Loading..." : "Get Models"}
               </Button>
@@ -413,7 +506,11 @@ export function SettingsPage() {
           </div>
 
           <div className="flex justify-end">
-            <Button onClick={handleSaveAIConfig} disabled={aiConfigMutation.isPending}>
+            <Button
+              onClick={handleSaveAIConfig}
+              disabled={!isAiConfigDirty || aiConfigMutation.isPending}
+              variant={isAiConfigDirty ? "default" : "secondary"}
+            >
               <Save className="mr-2 h-4 w-4" />
               {aiConfigMutation.isPending ? "Saving..." : "Save AI Config"}
             </Button>
@@ -445,7 +542,11 @@ export function SettingsPage() {
             <p className="mt-1 text-xs text-gray-500">Used to search for referenced books and articles</p>
           </div>
           <div className="flex justify-end">
-            <Button onClick={handleSaveSearchEngine} disabled={searchEngineMutation.isPending}>
+            <Button
+              onClick={handleSaveSearchEngine}
+              disabled={!isSearchEngineDirty || searchEngineMutation.isPending}
+              variant={isSearchEngineDirty ? "default" : "secondary"}
+            >
               <Save className="mr-2 h-4 w-4" />
               {searchEngineMutation.isPending ? "Saving..." : "Save Search Settings"}
             </Button>

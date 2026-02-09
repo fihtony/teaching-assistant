@@ -12,7 +12,9 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.logging import get_logger
 from app.core.security import encrypt_api_key, get_current_teacher_id
-from app.models import GradingHistory, AIProviderConfig, GradingTemplate, DEFAULT_TEACHER_ID
+from app.core.datetime_utils import from_iso_datetime, get_now_with_timezone
+from app.core.settings_db import ensure_settings_config
+from app.models import GradingHistory, GradingTemplate, DEFAULT_TEACHER_ID
 from app.schemas.grading import (
     GradeEssayRequest,
     GradingResultResponse,
@@ -230,58 +232,29 @@ async def save_ai_config(
     teacher_id: int = DEFAULT_TEACHER_ID,
 ):
     """
-    Save AI provider configuration.
-
+    Save AI provider configuration (stored in Settings table, type=ai-config).
     API key is encrypted before storage.
     """
     try:
-        # If this is set as default, unset other defaults
-        if request.is_default:
-            db.query(AIProviderConfig).filter(
-                AIProviderConfig.teacher_id == teacher_id,
-                AIProviderConfig.is_default == True,
-            ).update({"is_default": False})
-
-        # Create or update config
-        config = (
-            db.query(AIProviderConfig)
-            .filter(
-                AIProviderConfig.teacher_id == teacher_id,
-                AIProviderConfig.provider == request.provider,
-            )
-            .first()
-        )
-
-        encrypted_key = encrypt_api_key(request.api_key)
-
-        if config:
-            config.api_key_encrypted = encrypted_key
-            config.model = request.model
-            config.is_default = request.is_default
-            config.updated_at = datetime.utcnow()
-        else:
-            config = AIProviderConfig(
-                id=f"{teacher_id}_{request.provider}",
-                teacher_id=teacher_id,
-                provider=request.provider,
-                api_key_encrypted=encrypted_key,
-                model=request.model,
-                is_default=request.is_default,
-            )
-            db.add(config)
-
+        rec = ensure_settings_config(db)
+        config_data = dict(rec.config or {})
+        config_data["provider"] = request.provider
+        config_data["model"] = request.model or config_data.get("model", "gpt-4o")
+        if request.api_key:
+            config_data["api_key"] = encrypt_api_key(request.api_key)
+        rec.config = config_data
+        rec.updated_at = get_now_with_timezone().isoformat()
         db.commit()
-        db.refresh(config)
-
+        db.refresh(rec)
+        now = get_now_with_timezone()
         return AIProviderConfigResponse(
-            id=config.id,
-            provider=config.provider,
-            model=config.model,
-            is_default=config.is_default,
-            created_at=config.created_at,
-            updated_at=config.updated_at,
+            id="ai-config",
+            provider=rec.config.get("provider", "openai"),
+            model=rec.config.get("model"),
+            is_default=True,
+            created_at=from_iso_datetime(rec.created_at) or now,
+            updated_at=now,
         )
-
     except Exception as e:
         logger.error(f"Error saving AI config: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to save configuration")
@@ -292,23 +265,19 @@ async def get_ai_configs(
     db: Session = Depends(get_db),
     teacher_id: int = DEFAULT_TEACHER_ID,
 ):
-    """Get current AI provider configurations for the teacher."""
-    configs = (
-        db.query(AIProviderConfig)
-        .filter(AIProviderConfig.teacher_id == teacher_id)
-        .all()
-    )
-
+    """Get current AI provider configuration (from Settings table, type=ai-config)."""
+    rec = ensure_settings_config(db)
+    config_data = rec.config or {}
+    now = get_now_with_timezone()
     return [
         AIProviderConfigResponse(
-            id=c.id,
-            provider=c.provider,
-            model=c.model,
-            is_default=c.is_default,
-            created_at=c.created_at,
-            updated_at=c.updated_at,
+            id="ai-config",
+            provider=config_data.get("provider", "openai"),
+            model=config_data.get("model", "gpt-4o"),
+            is_default=True,
+            created_at=from_iso_datetime(rec.created_at) or now,
+            updated_at=from_iso_datetime(rec.updated_at) or now,
         )
-        for c in configs
     ]
 
 

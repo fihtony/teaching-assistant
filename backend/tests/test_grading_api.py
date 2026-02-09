@@ -96,34 +96,17 @@ class TestGradingAPI:
         assert "api_key" not in config  # Should not return API key
 
     def test_get_ai_configs(self, client_with_test_db, db_session):
-        """Test getting AI provider configurations."""
-        # Create teacher and config
-        from app.models import Teacher, AIProviderConfig, DEFAULT_TEACHER_ID
-        from app.core.security import encrypt_api_key
+        """Test getting AI provider configurations (from Settings type=ai-config)."""
+        from app.core.settings_db import ensure_settings_config
 
-        teacher = db_session.query(Teacher).filter(Teacher.id == DEFAULT_TEACHER_ID).first()
-        if not teacher:
-            teacher = Teacher(id=DEFAULT_TEACHER_ID, name="Test Teacher")
-            db_session.add(teacher)
-            db_session.commit()
-
-        config = AIProviderConfig(
-            id=f"{teacher.id}_zhipuai",
-            teacher_id=teacher.id,
-            provider="zhipuai",
-            api_key_encrypted=encrypt_api_key("test_key"),
-            model="glm-4.7",
-            is_default=True,
-        )
-        db_session.add(config)
-        db_session.commit()
-
+        ensure_settings_config(db_session)
         response = client_with_test_db.get("/api/v1/grading/providers/config")
         assert response.status_code == 200
 
         configs = response.json()
         assert isinstance(configs, list)
         assert len(configs) >= 1
+        assert configs[0]["id"] == "ai-config"
 
     def test_upload_essay_file(self, client_with_test_db):
         """Test uploading an essay file."""

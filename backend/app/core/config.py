@@ -45,57 +45,16 @@ class LoggingConfig(BaseModel):
     backup_count: int = 5
 
 
-class AIConfig(BaseModel):
-    """AI provider configuration."""
-
-    default_provider: str = "openai"
-    default_model: str = "gpt-4o"
-    timeout: int = 60
-    max_retries: int = 3
-
-
-class SearchConfig(BaseModel):
-    """Web search configuration."""
-
-    engine: str = "duckduckgo"
-    max_results: int = 10
-    cache_days: int = 7
-
-
-class ArticleCacheConfig(BaseModel):
-    """Article cache configuration."""
-
-    cache_days: int = 30
-    max_articles: int = 1000
-
-
-class GreetingConfig(BaseModel):
-    """Greeting generation configuration."""
-
-    lookback_days: int = 30
-    no_repeat_hours: int = 24
-
-
-class OCRConfig(BaseModel):
-    """OCR configuration."""
-
-    engine: str = "easyocr"
-    languages: List[str] = ["en", "ch_sim"]
-    gpu: bool = False
-
-
 class AppConfig(BaseModel):
-    """Main application configuration."""
+    """Main application configuration.
+
+    AI, search, cache, greeting, OCR are in Settings table (see app.core.settings_db).
+    """
 
     server: ServerConfig = ServerConfig()
     database: DatabaseConfig = DatabaseConfig()
     storage: StorageConfig = StorageConfig()
     logging: LoggingConfig = LoggingConfig()
-    ai: AIConfig = AIConfig()
-    search: SearchConfig = SearchConfig()
-    article_cache: ArticleCacheConfig = ArticleCacheConfig()
-    greeting: GreetingConfig = GreetingConfig()
-    ocr: OCRConfig = OCRConfig()
 
 
 def get_project_root() -> Path:
@@ -173,10 +132,13 @@ def get_storage_path(storage_type: str) -> Path:
 
 
 def get_database_path() -> Path:
-    """Get the absolute path to the database file."""
+    """Get the absolute path to the database file.
+    Used by: app.core.database (engine), app.core.migration.
+    Default value: config.yaml 'database.path' or DatabaseConfig.path in config.py ('data/teaching.db').
+    """
     config = get_config()
-    backend_dir = get_backend_dir()
-    db_path = (backend_dir / config.database.path).resolve()
+    root = get_project_root()
+    db_path = (root / config.database.path).resolve()
     db_path.parent.mkdir(parents=True, exist_ok=True)
     return db_path
 

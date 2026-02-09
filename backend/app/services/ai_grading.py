@@ -9,9 +9,9 @@ import re
 
 from sqlalchemy.orm import Session
 
-from app.core.config import get_config
 from app.core.logging import get_logger
 from app.core.security import decrypt_api_key
+from app.core.settings_db import ensure_settings_config
 from app.models import (
     Assignment,
     Settings,
@@ -53,7 +53,6 @@ class AIGradingService:
 
     def __init__(self, db: Session):
         self.db = db
-        self.config = get_config()
         self._litellm = None
 
     def _get_litellm(self):
@@ -105,13 +104,14 @@ class AIGradingService:
             AI response text.
         """
         ai_config = self._get_ai_config()
+        defaults = ensure_settings_config(self.db).config or {}
 
         if provider is None:
             ai_config_data = ai_config.config if ai_config else {}
-            provider = ai_config_data.get("provider") or self.config.ai.default_provider
+            provider = ai_config_data.get("provider") or defaults.get("provider", "openai")
         if model is None:
             ai_config_data = ai_config.config if ai_config else {}
-            model = ai_config_data.get("model") or self.config.ai.default_model
+            model = ai_config_data.get("model") or defaults.get("model", "gpt-4o")
 
         logger.info(f"Calling AI: provider={provider}, model={model}")
 
@@ -529,10 +529,12 @@ Respond in JSON format:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
+        ai_config = self._get_ai_config()
+        timeout = (ai_config.config or {}).get("timeout", 60) if ai_config else 60
         response = await litellm.acompletion(
             model=model,
             messages=messages,
-            timeout=self.config.ai.timeout,
+            timeout=timeout,
         )
         return response.choices[0].message.content
 

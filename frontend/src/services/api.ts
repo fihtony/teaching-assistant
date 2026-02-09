@@ -132,19 +132,36 @@ export const templatesApi = {
 
 // Settings API
 export const settingsApi = {
-  // Get settings
+  // Get all settings (AI config + search_engine) in one call; backend never returns api_key
+  getSettings: async (): Promise<AIConfig & { search_engine?: string }> => {
+    const response = await api.get("/settings/settings");
+    return response.data;
+  },
+
   getAIConfig: async (): Promise<AIConfig> => {
     const response = await api.get("/settings/settings");
     return response.data;
   },
 
-  // Update settings
+  // Update AI provider config only (clean body; no GET after save)
+  updateAIProvider: async (update: {
+    provider?: string;
+    model?: string;
+    base_url?: string;
+    api_key?: string;
+    temperature?: number;
+    max_tokens?: number;
+  }): Promise<{ ok: boolean }> => {
+    const response = await api.post("/settings/ai-provider", update);
+    return response.data;
+  },
+
   updateAIConfig: async (update: AIConfigUpdate): Promise<AIConfig> => {
     const response = await api.post("/settings/settings", update);
     return response.data;
   },
 
-  // Get search engine configuration
+  // Search engine: loaded from getSettings; save via separate endpoint
   getSearchEngine: async (): Promise<{ engine: string }> => {
     const response = await api.get("/settings/search-engine");
     return response.data;
@@ -157,12 +174,26 @@ export const settingsApi = {
   },
 
   // Get available models from a provider
-  getModels: async (provider: string, baseUrl?: string): Promise<(string | { name: string; vendor: string; id: string })[]> => {
+  getModels: async (
+    provider: string,
+    baseUrl?: string,
+    apiKey?: string
+  ): Promise<{
+    models: (string | { name: string; vendor: string; id: string })[];
+    error?: string;
+    message?: string;
+  }> => {
     const response = await api.post("/settings/get-models", {
       provider,
       base_url: baseUrl,
+      api_key: apiKey,
     });
-    return response.data.models || [];
+    const data = response.data as { models?: unknown[]; error?: string; message?: string };
+    return {
+      models: data.models || [],
+      error: data.error,
+      message: data.message,
+    };
   },
 
   // Test connection to a provider

@@ -87,17 +87,16 @@ def test_complete_workflow():
     assert data["max_tokens"] == 2048
     print("✅ AI configuration saved with temperature and max_tokens")
 
-    # Step 3: Get models from provider
+    # Step 3: Get models from provider (no fallback; without valid key may get empty + error)
     print("\n3️⃣  Fetching available models...")
     response = client.post(
         "/api/v1/settings/get-models",
-        json={"provider": "anthropic", "base_url": "https://api.anthropic.com"},
+        json={"provider": "anthropic", "base_url": "https://api.anthropic.com", "api_key": ""},
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["success"] is True
-    assert len(data["models"]) > 0
-    print(f"✅ Retrieved {len(data['models'])} models: {data['models']}")
+    assert "models" in data and isinstance(data["models"], list)
+    print(f"✅ Get-models response: success={data.get('success')}, models count={len(data['models'])}, error={data.get('error')}")
 
     # Step 4: Verify database persistence
     print("\n4️⃣  Verifying database persistence...")
@@ -131,21 +130,21 @@ def test_complete_workflow():
     assert data["status"] == "healthy"
     print(f"✅ Health endpoint returns startup_timestamp: {data['startup_timestamp']}")
 
-    # Step 6: Get models for other providers
+    # Step 6: Get models for other providers (structure only; may be empty without API keys)
     print("\n6️⃣  Testing Get Models for multiple providers...")
     providers_to_test = [
         ("openai", "https://api.openai.com/v1"),
-        ("google", "https://generativelanguage.googleapis.com"),
+        ("google", "https://generativelanguage.googleapis.com/v1beta/openai"),
     ]
 
     for provider, base_url in providers_to_test:
         response = client.post(
             "/api/v1/settings/get-models",
-            json={"provider": provider, "base_url": base_url},
+            json={"provider": provider, "base_url": base_url, "api_key": ""},
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["success"] is True
+        assert "models" in data and isinstance(data["models"], list)
         print(f"✅ {provider.capitalize()}: {len(data['models'])} models available")
 
     print("\n" + "=" * 70)

@@ -13,33 +13,34 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.config import get_storage_path
 from app.core.logging import get_logger
-from app.core.security import encrypt_api_key, decrypt_api_key
+from app.core.security import encrypt_api_key, decrypt_api_key_safe
+from app.core.settings_db import ensure_settings_config, ensure_search_engine_config
 from app.models import Teacher, Settings, DEFAULT_TEACHER_ID
 from app.schemas import (
     AIConfigResponse,
     AIConfigUpdate,
+    AIProviderUpdate,
+    GetModelsRequest,
     ProviderInfo,
     TeacherProfileResponse,
     TeacherProfileUpdate,
     TestConnectionRequest,
     TestConnectionResponse,
 )
+from app.services.model_fetcher import fetch_models
 
 logger = get_logger()
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
 
 
-# Available models for each provider
+# Provider list for GET /settings (models are fetched via POST /get-models with user's base_url/api_key)
 PROVIDER_MODELS = {
-    "openai": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
-    "anthropic": [
-        "claude-3-5-sonnet-20241022",
-        "claude-3-5-haiku-20241022",
-        "claude-3-opus-20240229",
-    ],
-    "google": ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-pro"],
-    "copilot": [],  # Models will be fetched from Copilot Bridge
+    "openai": [],
+    "anthropic": [],
+    "google": [],
+    "zhipuai": [],
+    "copilot": [],
 }
 
 
@@ -54,43 +55,7 @@ def ensure_default_teacher(db: Session) -> Teacher:
     return teacher
 
 
-def ensure_settings_config(db: Session) -> Settings:
-    """Ensure the default settings (ai-config type) exists."""
-    config = db.query(Settings).filter(Settings.type == "ai-config").first()
-    if not config:
-        config = Settings(
-            type="ai-config",
-            config={
-                "provider": "openai",
-                "baseUrl": "https://api.openai.com/v1",
-                "model": "gpt-4o",
-                "max_token": 4096,
-                "temperature": 0.3,
-            },
-        )
-        db.add(config)
-        db.commit()
-        db.refresh(config)
-    return config
-
-
-def ensure_search_engine_config(db: Session) -> Settings:
-    """Ensure the search engine config exists (type=search)."""
-    config = db.query(Settings).filter(Settings.type == "search").first()
-    if not config:
-        config = Settings(
-            type="search",
-            config={
-                "engine": "duckduckgo",
-            },
-        )
-        db.add(config)
-        db.commit()
-        db.refresh(config)
-    return config
-
-
-# AI Configuration endpoints
+# AI Configuration endpoints (ensure_* live in app.core.settings_db)
 
 
 @router.get("/settings", response_model=AIConfigResponse)
@@ -112,7 +77,8 @@ async def get_settings(db: Session = Depends(get_db)):
     base_url = config_data.get("baseUrl", "https://api.openai.com/v1")
     temperature = config_data.get("temperature", 0.3)
     max_token = config_data.get("max_token", 8192)
-    api_key = config_data.get("api_key")
+    # Never send real api_key to frontend; frontend uses empty and backend uses DB key when needed
+    api_key = ""
 
     providers = []
     for provider_name, models in PROVIDER_MODELS.items():
@@ -122,9 +88,7 @@ async def get_settings(db: Session = Depends(get_db)):
             ProviderInfo(
                 name=provider_name,
                 is_configured=is_configured,
-                available_models=(
-                    models if models else ["gpt-5-mini"]
-                ),  # Default Copilot models
+                available_models=models,
             )
         )
 
@@ -188,33 +152,32 @@ async def test_connection(request: TestConnectionRequest):
 
 
 @router.post("/get-models")
-async def get_models(
-    request: TestConnectionRequest,
-):
+async def get_models(request: GetModelsRequest, db: Session = Depends(get_db)):
     """
-    Get available models from a provider.
-    Returns a list of model names.
+    Fetch available models from the provider.
+    - If request.api_key is non-empty: use it (user typed a new key or unsaved config).
+    - Else: load saved AI config from DB, decrypt api_key, use it with base_url from DB or request.
     """
-    models = []
+    api_key = (request.api_key or "").strip()
+    base_url = (request.base_url or "").strip()
 
-    if request.provider == "copilot":
-        base_url = request.base_url or "http://localhost:1287"
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(f"{base_url}/models")
-                if response.status_code == 200:
-                    data = response.json()
-                    models = data.get("models", [])
-        except Exception:
-            pass
-    elif request.provider in PROVIDER_MODELS:
-        # Return built-in models for other providers
-        models = PROVIDER_MODELS.get(request.provider, [])
+    if not api_key:
+        config = ensure_settings_config(db)
+        config_data = config.config or {}
+        api_key = decrypt_api_key_safe(config_data.get("api_key"))
+        if not base_url:
+            base_url = config_data.get("baseUrl", "")
 
+    models, error = await fetch_models(
+        provider=request.provider,
+        base_url=base_url or None,
+        api_key=api_key or None,
+    )
     return {
         "success": len(models) > 0,
         "models": models,
-        "message": f"Found {len(models)} models" if models else "No models found",
+        "message": f"Found {len(models)} models" if models else (error or "No models found"),
+        "error": error,
     }
 
 
@@ -281,6 +244,39 @@ async def update_settings(
     logger.info(f"Updated settings configuration: {new_config.config}")
 
     return await get_settings(db)
+
+
+@router.post("/ai-provider")
+async def update_ai_provider(update: AIProviderUpdate, db: Session = Depends(get_db)):
+    """
+    Save only AI provider config. Request body: provider, model, base_url, api_key, temperature, max_tokens.
+    No GET after save; returns minimal success response.
+    """
+    config = ensure_settings_config(db)
+    config_data = dict(config.config or {})
+
+    if update.provider is not None:
+        config_data["provider"] = update.provider
+    if update.model is not None:
+        config_data["model"] = update.model
+    if update.base_url is not None:
+        config_data["baseUrl"] = update.base_url
+    if update.temperature is not None:
+        config_data["temperature"] = update.temperature
+    if update.max_tokens is not None:
+        config_data["max_token"] = update.max_tokens
+    if update.api_key:
+        config_data["api_key"] = encrypt_api_key(update.api_key)
+
+    existing = db.query(Settings).filter(Settings.type == "ai-config").first()
+    if existing:
+        db.delete(existing)
+        db.commit()
+    new_config = Settings(type="ai-config", config=config_data)
+    db.add(new_config)
+    db.commit()
+    logger.info("Updated AI provider configuration")
+    return {"ok": True}
 
 
 @router.get("/search-engine", response_model=dict)

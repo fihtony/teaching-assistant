@@ -1,46 +1,44 @@
 """
 OCR service for extracting text from images and PDFs.
+Config (engine, languages, gpu) is read from Settings table (type=ocr).
 """
 
 import io
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 import tempfile
 
 from PIL import Image
+from sqlalchemy.orm import Session
 
-from app.core.config import get_config
 from app.core.logging import get_logger
+from app.core.settings_db import ensure_ocr_config
 from app.models.assignment import SourceFormat
 
 logger = get_logger()
-
-# Lazy load EasyOCR to avoid slow startup
-_reader = None
-
-
-def get_ocr_reader():
-    """Get or create the EasyOCR reader instance."""
-    global _reader
-    if _reader is None:
-        import easyocr
-
-        config = get_config()
-        _reader = easyocr.Reader(
-            config.ocr.languages,
-            gpu=config.ocr.gpu,
-        )
-        logger.info(f"Initialized EasyOCR with languages: {config.ocr.languages}")
-    return _reader
 
 
 class OCRService:
     """
     Service for extracting text from images and PDFs using EasyOCR.
+    Config from Settings type=ocr (defaults in ensure_ocr_config).
     """
 
-    def __init__(self):
-        self.config = get_config()
+    def __init__(self, db: Session):
+        self.db = db
+        self._reader = None
+
+    def _get_ocr_reader(self):
+        """Get or create EasyOCR reader from DB config (Settings type=ocr)."""
+        if self._reader is None:
+            import easyocr
+            rec = ensure_ocr_config(self.db)
+            cfg = rec.config or {}
+            languages = cfg.get("languages", ["en", "ch_sim"])
+            gpu = cfg.get("gpu", False)
+            self._reader = easyocr.Reader(languages, gpu=gpu)
+            logger.info("Initialized EasyOCR with languages=%s, gpu=%s", languages, gpu)
+        return self._reader
 
     def extract_text_from_image(self, image_path: str) -> str:
         """
@@ -53,7 +51,7 @@ class OCRService:
             Extracted text.
         """
         try:
-            reader = get_ocr_reader()
+            reader = self._get_ocr_reader()
             results = reader.readtext(image_path)
 
             # Extract text from results
@@ -152,7 +150,7 @@ class OCRService:
             images = convert_from_path(pdf_path, dpi=200)
 
             all_text = []
-            reader = get_ocr_reader()
+            reader = self._get_ocr_reader()
 
             for i, image in enumerate(images):
                 # Convert PIL Image to bytes
@@ -236,13 +234,6 @@ class OCRService:
             raise ValueError(f"Unsupported format: {source_format}")
 
 
-# Global OCR service instance
-_ocr_service: Optional[OCRService] = None
-
-
-def get_ocr_service() -> OCRService:
-    """Get the global OCR service instance."""
-    global _ocr_service
-    if _ocr_service is None:
-        _ocr_service = OCRService()
-    return _ocr_service
+def get_ocr_service(db: Session) -> OCRService:
+    """Get OCR service instance (config from Settings type=ocr)."""
+    return OCRService(db)

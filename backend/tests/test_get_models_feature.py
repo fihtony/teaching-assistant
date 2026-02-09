@@ -17,53 +17,53 @@ def setup_db():
 
 
 def test_get_models_openai():
-    """Test fetching OpenAI models."""
+    """Test get-models for OpenAI (uses user base_url/api_key; without key may return empty)."""
     client = TestClient(app)
 
     response = client.post(
         "/api/v1/settings/get-models",
-        json={"provider": "openai", "base_url": "https://api.openai.com/v1"},
+        json={"provider": "openai", "base_url": "https://api.openai.com/v1", "api_key": ""},
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["success"] is True
+    assert "success" in data and "models" in data and "message" in data
     assert isinstance(data["models"], list)
-    assert len(data["models"]) > 0
+    # Without valid API key the list may be empty
     print(f"OpenAI models: {data['models']}")
 
 
 def test_get_models_anthropic():
-    """Test fetching Anthropic models."""
+    """Test get-models for Anthropic (no fallback; without valid key returns error/empty)."""
     client = TestClient(app)
 
     response = client.post(
         "/api/v1/settings/get-models",
-        json={"provider": "anthropic", "base_url": "https://api.anthropic.com"},
+        json={"provider": "anthropic", "base_url": "https://api.anthropic.com", "api_key": ""},
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["success"] is True
+    assert "success" in data and "models" in data and "message" in data
     assert isinstance(data["models"], list)
-    assert len(data["models"]) > 0
-    print(f"Anthropic models: {data['models']}")
+    # Without valid API key we get empty models and an error message (no dummy list)
+    print(f"Anthropic models: {data['models']}, error: {data.get('error')}")
 
 
 def test_get_models_google():
-    """Test fetching Google models."""
+    """Test get-models for Google Gemini (without key may return empty)."""
     client = TestClient(app)
 
     response = client.post(
         "/api/v1/settings/get-models",
         json={
             "provider": "google",
-            "base_url": "https://generativelanguage.googleapis.com",
+            "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+            "api_key": "",
         },
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["success"] is True
+    assert "success" in data and "models" in data
     assert isinstance(data["models"], list)
-    assert len(data["models"]) > 0
     print(f"Google models: {data['models']}")
 
 

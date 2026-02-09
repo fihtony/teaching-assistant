@@ -11,8 +11,8 @@ import requests
 from bs4 import BeautifulSoup
 from sqlalchemy.orm import Session
 
-from app.core.config import get_config
 from app.core.logging import get_logger
+from app.core.settings_db import ensure_cache_config, ensure_search_engine_config
 from app.models import CachedArticle
 
 logger = get_logger()
@@ -57,7 +57,11 @@ class SearchService:
 
     def __init__(self, db: Session):
         self.db = db
-        self.config = get_config()
+
+    def _get_search_config(self) -> dict:
+        """Get search config from DB (Settings type=search). Defaults in ensure_search_engine_config."""
+        rec = ensure_search_engine_config(self.db)
+        return rec.config or {}
 
     def search(
         self,
@@ -65,16 +69,18 @@ class SearchService:
         max_results: int = 10,
     ) -> List[SearchResult]:
         """
-        Search for articles using the configured search engine.
+        Search for articles using the configured search engine (from Settings type=search).
 
         Args:
             query: Search query.
-            max_results: Maximum number of results.
+            max_results: Maximum number of results (overridden by DB config if set).
 
         Returns:
             List of search results.
         """
-        engine = self.config.search.engine.lower()
+        cfg = self._get_search_config()
+        engine = (cfg.get("engine") or "duckduckgo").lower()
+        max_results = cfg.get("max_results", max_results)
 
         if engine == "duckduckgo":
             return self._search_duckduckgo(query, max_results)
@@ -331,8 +337,10 @@ class SearchService:
         author: Optional[str],
         source_url: str,
     ) -> CachedArticle:
-        """Cache an article in the database."""
-        cache_days = self.config.article_cache.cache_days
+        """Cache an article in the database (cache_days from Settings type=cache)."""
+        rec = ensure_cache_config(self.db)
+        cache_days = (rec.config or {}).get("cache_days", 30)
+        expires_dt = datetime.utcnow() + timedelta(days=cache_days)
 
         article = CachedArticle(
             title=title,
@@ -342,7 +350,7 @@ class SearchService:
             full_content=content[:100000],  # Limit content size
             summary=summary,
             notable_quotes=json.dumps(quotes),
-            expires_at=datetime.utcnow() + timedelta(days=cache_days),
+            expires_at=expires_dt.isoformat(),
         )
 
         self.db.add(article)

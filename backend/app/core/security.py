@@ -80,7 +80,7 @@ def decrypt_api_key(encrypted_key: str, password: Optional[str] = None) -> str:
 
     Args:
         encrypted_key: The encrypted API key (base64-encoded).
-        password: Optional password for decryption.
+        password: Optional password for encryption.
 
     Returns:
         Decrypted API key.
@@ -90,3 +90,16 @@ def decrypt_api_key(encrypted_key: str, password: Optional[str] = None) -> str:
     encrypted_bytes = base64.urlsafe_b64decode(encrypted_key.encode())
     decrypted = fernet.decrypt(encrypted_bytes)
     return decrypted.decode()
+
+
+def decrypt_api_key_safe(stored_value: Optional[str], password: Optional[str] = None) -> str:
+    """
+    Decrypt API key if it is encrypted; return as-is if plain text or empty.
+    Use when the stored value might be either encrypted (after save) or plain (legacy/migration).
+    """
+    if not stored_value or not stored_value.strip():
+        return ""
+    try:
+        return decrypt_api_key(stored_value, password)
+    except Exception:
+        return stored_value

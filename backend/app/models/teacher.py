@@ -40,7 +40,6 @@ class Teacher(Base):
     assignments = relationship("Assignment", back_populates="teacher")
     templates = relationship("GradingTemplate", back_populates="teacher")
     grading_history = relationship("GradingHistory", back_populates="teacher")
-    ai_configs = relationship("AIProviderConfig", back_populates="teacher")
 
     def __repr__(self) -> str:
         return f"<Teacher(id={self.id}, name={self.name})>"

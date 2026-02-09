@@ -93,30 +93,27 @@ class TestTeacherProfileAPI:
 
 
 class TestAIConfigAPI:
-    """Test cases for AI configuration endpoints."""
+    """Test cases for AI configuration endpoints (Settings type=ai-config)."""
+
+    def _get_ai_config(self, db):
+        rec = db.query(Settings).filter(Settings.type == "ai-config").first()
+        return rec.config if rec else {}
 
     def test_get_ai_config_default(self, client, db):
         """Test getting default AI configuration."""
-        response = client.get("/api/v1/settings/ai-config")
+        response = client.get("/api/v1/settings/settings")
         assert response.status_code == 200
         data = response.json()
         assert data["default_provider"] == "openai"
         assert data["default_model"] == "gpt-4o"
-        assert data["is_configured"] == False
 
-        # Verify in database
-        config = (
-            db.query(AIConfigModel)
-            .filter(AIConfigModel.id == "default-ai-config-001")
-            .first()
-        )
-        assert config is not None
-        assert config.default_provider == "openai"
+        config = self._get_ai_config(db)
+        assert config.get("provider", config.get("default_provider")) == "openai"
 
     def test_update_ai_config_provider(self, client, db):
         """Test updating AI provider configuration."""
         response = client.post(
-            "/api/v1/settings/ai-config",
+            "/api/v1/settings/settings",
             json={
                 "default_provider": "anthropic",
                 "default_model": "claude-3-5-sonnet-20241022",
@@ -127,40 +124,29 @@ class TestAIConfigAPI:
         assert data["default_provider"] == "anthropic"
         assert data["default_model"] == "claude-3-5-sonnet-20241022"
 
-        # Verify in database
-        config = (
-            db.query(AIConfigModel)
-            .filter(AIConfigModel.id == "default-ai-config-001")
-            .first()
-        )
-        assert config.default_provider == "anthropic"
-        assert config.default_model == "claude-3-5-sonnet-20241022"
+        config = self._get_ai_config(db)
+        assert config.get("provider") == "anthropic"
+        assert config.get("model") == "claude-3-5-sonnet-20241022"
 
     def test_update_ai_config_with_api_key(self, client, db):
         """Test updating AI config with API key."""
         response = client.post(
-            "/api/v1/settings/ai-config",
+            "/api/v1/settings/settings",
             json={
                 "default_provider": "openai",
                 "default_model": "gpt-4o",
-                "api_keys": {"openai": "sk-test-key-12345"},
+                "api_key": "sk-test-key-12345",
             },
         )
         assert response.status_code == 200
 
-        # Verify in database - API key should be encrypted
-        config = (
-            db.query(AIConfigModel)
-            .filter(AIConfigModel.id == "default-ai-config-001")
-            .first()
-        )
-        assert config.openai_api_key is not None
-        assert config.is_configured == True
+        config = self._get_ai_config(db)
+        assert config.get("api_key") is not None
 
     def test_update_ai_config_copilot(self, client, db):
         """Test updating AI config with Copilot settings."""
         response = client.post(
-            "/api/v1/settings/ai-config",
+            "/api/v1/settings/settings",
             json={
                 "default_provider": "copilot",
                 "default_model": "gpt-5-mini",
@@ -171,51 +157,33 @@ class TestAIConfigAPI:
         data = response.json()
         assert data["copilot_base_url"] == "http://localhost:1287"
 
-        # Verify in database
-        config = (
-            db.query(AIConfigModel)
-            .filter(AIConfigModel.id == "default-ai-config-001")
-            .first()
-        )
-        assert config.copilot_base_url == "http://localhost:1287"
+        config = self._get_ai_config(db)
+        assert config.get("copilot_base_url") == "http://localhost:1287"
 
     def test_update_ai_config_search_engine(self, client, db):
-        """Test updating search engine configuration."""
-        response = client.post(
-            "/api/v1/settings/ai-config", json={"search_engine": "google"}
-        )
+        """Test updating search engine (stored in Settings type=search)."""
+        response = client.post("/api/v1/settings/search-engine", json={"engine": "google"})
         assert response.status_code == 200
 
-        # Verify in database
-        config = (
-            db.query(AIConfigModel)
-            .filter(AIConfigModel.id == "default-ai-config-001")
-            .first()
-        )
-        assert config.search_engine == "google"
+        rec = db.query(Settings).filter(Settings.type == "search").first()
+        assert rec is not None
+        assert (rec.config or {}).get("engine") == "google"
 
     def test_ai_config_multiple_updates(self, client, db):
         """Test multiple sequential updates to AI config."""
-        # First update
         response1 = client.post(
-            "/api/v1/settings/ai-config", json={"default_provider": "google"}
+            "/api/v1/settings/settings", json={"default_provider": "google"}
         )
         assert response1.status_code == 200
 
-        # Second update
         response2 = client.post(
-            "/api/v1/settings/ai-config", json={"default_model": "gemini-1.5-pro"}
+            "/api/v1/settings/settings", json={"default_model": "gemini-1.5-pro"}
         )
         assert response2.status_code == 200
 
-        # Verify final state in database
-        config = (
-            db.query(AIConfigModel)
-            .filter(AIConfigModel.id == "default-ai-config-001")
-            .first()
-        )
-        assert config.default_provider == "google"
-        assert config.default_model == "gemini-1.5-pro"
+        config = self._get_ai_config(db)
+        assert config.get("provider") == "google"
+        assert config.get("model") == "gemini-1.5-pro"
 
 
 class TestTemplatesAPI:

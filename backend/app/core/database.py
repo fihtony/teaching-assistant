@@ -62,7 +62,10 @@ def init_db():
     """
     Initialize the database by creating all tables.
     Should be called on application startup.
+    Drops legacy ai_provider_config table if present (AI config now in Settings).
     """
+    from sqlalchemy import text
+
     # Import all models to ensure they are registered with Base
     from app.models import (
         teacher,
@@ -71,9 +74,14 @@ def init_db():
         settings,
         cached_article,
         grading_context,
+        grading_history,
     )
 
     engine = get_engine()
+    # Drop legacy table (AI config is now in Settings type=ai-config)
+    with engine.connect() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS ai_provider_config"))
+        conn.commit()
     Base.metadata.create_all(bind=engine)
 
 

@@ -102,7 +102,7 @@ async def upload_assignment(
 
     # Start OCR extraction in background (for now, do it synchronously)
     try:
-        ocr_service = get_ocr_service()
+        ocr_service = get_ocr_service(db)
         extracted_text = await ocr_service.extract_text(file_path, source_format)
         assignment.extracted_text = extracted_text
         assignment.status = AssignmentStatus.UPLOADED
