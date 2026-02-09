@@ -4,16 +4,15 @@
 import pytest
 from fastapi.testclient import TestClient
 from main import app
-from app.core.database import init_db, drop_db
+from app.core.database import init_db
 
 
 @pytest.fixture(scope="function", autouse=True)
 def setup_db():
-    """Clean database before each test."""
-    drop_db()
+    """Ensure tables exist; do not clear user data."""
     init_db()
     yield
-    drop_db()
+    # Get-models tests do not create any records; no teardown cleanup needed
 
 
 def test_get_models_openai():

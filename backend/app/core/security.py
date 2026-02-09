@@ -44,7 +44,7 @@ def get_encryption_key(password: Optional[str] = None) -> bytes:
     """
     if password is None:
         password = os.environ.get(
-            "TEACHING_ENCRYPTION_KEY", "default_key_for_local_use"
+            "TEACHING_ENCRYPTION_KEY", "default_key_for_local_use"  # Set in production; do not use default with real API keys
         )
 
     kdf = PBKDF2HMAC(

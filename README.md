@@ -40,6 +40,12 @@ Stop: `./scripts/stop.sh`
 - `config.yaml` — Server, logging, storage (AI/search/greeting/OCR are in DB)
 - `scripts/start.sh`, `scripts/stop.sh` — Start/stop services
 
+## Security (before public deploy)
+
+- **Secrets**: Do not commit `.env` or real API keys. Use environment variables (e.g. `TEACHING_ENCRYPTION_KEY` for encrypting stored API keys).
+- **Encryption**: In production, set `TEACHING_ENCRYPTION_KEY`; the in-code default is for local use only.
+- **Data**: `data/`, `logs/` and `.env` are gitignored; keep them out of the repo.
+
 ## License
 
 MIT License. See [LICENSE](LICENSE).

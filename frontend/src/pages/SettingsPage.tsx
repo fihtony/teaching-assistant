@@ -464,12 +464,12 @@ export function SettingsPage() {
               </select>
             </div>
             <div className="flex flex-col justify-end">
-              {/* Get Models button background: edit className below (bg-slate-200, hover:bg-slate-300) */}
+              {/* Get Models button background: edit className below (very light blue) */}
               <Button
                 onClick={handleGetModels}
                 disabled={getModelsDisabled}
                 variant="secondary"
-                className="bg-slate-200 hover:bg-slate-300 text-slate-800 border border-slate-300"
+                className="bg-sky-200 hover:bg-sky-300 text-slate-800 border border-sky-200"
               >
                 {isLoadingModels ? "Loading..." : "Get Models"}
               </Button>

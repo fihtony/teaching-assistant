@@ -2,14 +2,21 @@
 """
 Verification script for database schema migration.
 Tests that all models work correctly with the new Integer PK and ISO timestamp format.
+Uses a temporary database file so the main DB is never cleared.
 """
 
+import os
 import sys
+import tempfile
 from datetime import datetime
+from pathlib import Path
 
 # Add parent directory to path
-sys.path.insert(0, "/Users/aq69/study/ai/teaching/backend")
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from unittest.mock import patch
+
+import app.core.database as db_module
 from app.core.database import init_db, drop_db, get_session_local
 from app.models import (
     Teacher,
@@ -24,16 +31,24 @@ from app.core.datetime_utils import from_iso_datetime, to_iso_datetime
 
 
 def test_schema_migration():
-    """Test that all models work with new schema."""
+    """Test that all models work with new schema (uses temp DB; does not touch user data)."""
     print("\n" + "=" * 70)
     print("DATABASE SCHEMA MIGRATION VERIFICATION")
     print("=" * 70)
 
-    # Initialize fresh database
-    print("\n1️⃣  Initializing database with new schema...")
-    drop_db()
-    init_db()
-    print("✅ Database initialized with new schema")
+    # Use a temporary database so we never clear the main DB
+    fd, test_db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    test_db_path = Path(test_db_path)
+
+    with patch("app.core.config.get_database_path", return_value=test_db_path):
+        # Force re-creation of engine/session with temp path
+        db_module._engine = None
+        db_module._SessionLocal = None
+        print("\n1️⃣  Initializing temporary database with new schema...")
+        drop_db()
+        init_db()
+        print("✅ Database initialized with new schema")
 
     SessionLocal = get_session_local()
     db = SessionLocal()
@@ -255,6 +270,14 @@ Summary:
         return False
     finally:
         db.close()
+        # Reset so other tests use the main DB again
+        db_module._engine = None
+        db_module._SessionLocal = None
+        if test_db_path.exists():
+            try:
+                os.unlink(test_db_path)
+            except OSError:
+                pass
 
 
 if __name__ == "__main__":

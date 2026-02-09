@@ -241,7 +241,7 @@ async def update_settings(
     db.commit()
     db.refresh(new_config)
 
-    logger.info(f"Updated settings configuration: {new_config.config}")
+    logger.info("Updated settings configuration (keys: %s)", list((new_config.config or {}).keys()))
 
     return await get_settings(db)
 
@@ -325,7 +325,7 @@ async def update_search_engine_config(
     db.commit()
     db.refresh(new_config)
 
-    logger.info(f"Updated search engine configuration: {new_config.config}")
+    logger.info("Updated search engine configuration: engine=%s", new_config.config.get("engine"))
 
     return {
         "engine": new_config.config.get("engine", "duckduckgo"),
