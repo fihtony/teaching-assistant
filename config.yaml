@@ -1,0 +1,48 @@
+# English Teaching Assignment Grading System Configuration
+
+server:
+  host: "0.0.0.0"
+  port: 8090
+  debug: true
+
+database:
+  path: "data/teaching.db"
+
+storage:
+  uploads_dir: "data/uploads"
+  graded_dir: "data/graded"
+  templates_dir: "data/templates"
+  cache_dir: "data/cache"
+
+logging:
+  file: "app.log"
+  level: "DEBUG"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  max_size: 10
+  backup_count: 5
+
+ai:
+  default_provider: "zhipuai"
+  default_model: "GLM-4.7"
+  timeout: 60
+  max_retries: 3
+
+search:
+  engine: "duckduckgo"
+  max_results: 10
+  cache_days: 7
+
+article_cache:
+  cache_days: 30
+  max_articles: 1000
+
+greeting:
+  lookback_days: 30
+  no_repeat_hours: 24
+
+ocr:
+  engine: "easyocr"
+  languages:
+    - "en"
+    - "ch_sim"
+  gpu: false
