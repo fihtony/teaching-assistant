@@ -51,14 +51,16 @@ async def list_templates(
 
     items = [
         TemplateResponse(
-            id=t.id,
+            id=str(t.id),
             name=t.name,
-            description=t.description,
-            instructions=t.instructions,
+            description=t.description or "",
+            instructions=t.instructions or "",
+            instruction_format=getattr(t, "instruction_format", None) or "text",
+            encouragement_words=getattr(t, "encouragement_words", None) or [],
             question_types=t.question_types or [],
             created_at=t.created_at,
             updated_at=t.updated_at,
-            usage_count=t.usage_count,
+            usage_count=t.usage_count or 0,
         )
         for t in templates
     ]
@@ -76,12 +78,19 @@ async def create_template(
     """
     teacher = ensure_default_teacher(db)
 
+    qt_list = template.question_types or []
+    qt_stored = [
+        qt.model_dump() if hasattr(qt, "model_dump") else qt
+        for qt in qt_list
+    ]
     new_template = GradingTemplate(
         teacher_id=teacher.id,
         name=template.name,
         description=template.description,
         instructions=template.instructions,
-        question_types=[qt.value for qt in template.question_types],
+        instruction_format=getattr(template, "instruction_format", None) or "text",
+        encouragement_words=getattr(template, "encouragement_words", None) or [],
+        question_types=qt_stored,
     )
 
     db.add(new_template)
@@ -91,14 +100,16 @@ async def create_template(
     logger.info(f"Created template: {new_template.id} ({new_template.name})")
 
     return TemplateResponse(
-        id=new_template.id,
+        id=str(new_template.id),
         name=new_template.name,
-        description=new_template.description,
-        instructions=new_template.instructions,
+        description=new_template.description or "",
+        instructions=new_template.instructions or "",
+        instruction_format=new_template.instruction_format or "text",
+        encouragement_words=new_template.encouragement_words or [],
         question_types=new_template.question_types or [],
         created_at=new_template.created_at,
         updated_at=new_template.updated_at,
-        usage_count=new_template.usage_count,
+        usage_count=new_template.usage_count or 0,
     )
 
 
@@ -118,14 +129,16 @@ async def get_template(
         raise HTTPException(status_code=404, detail="Template not found")
 
     return TemplateResponse(
-        id=template.id,
+        id=str(template.id),
         name=template.name,
-        description=template.description,
-        instructions=template.instructions,
+        description=template.description or "",
+        instructions=template.instructions or "",
+        instruction_format=getattr(template, "instruction_format", None) or "text",
+        encouragement_words=getattr(template, "encouragement_words", None) or [],
         question_types=template.question_types or [],
         created_at=template.created_at,
         updated_at=template.updated_at,
-        usage_count=template.usage_count,
+        usage_count=template.usage_count or 0,
     )
 
 
@@ -151,8 +164,15 @@ async def update_template(
         template.description = update.description
     if update.instructions is not None:
         template.instructions = update.instructions
+    if getattr(update, "instruction_format", None) is not None:
+        template.instruction_format = update.instruction_format
+    if getattr(update, "encouragement_words", None) is not None:
+        template.encouragement_words = update.encouragement_words
     if update.question_types is not None:
-        template.question_types = [qt.value for qt in update.question_types]
+        template.question_types = [
+            qt.model_dump() if hasattr(qt, "model_dump") else qt
+            for qt in update.question_types
+        ]
 
     db.commit()
     db.refresh(template)
@@ -160,14 +180,16 @@ async def update_template(
     logger.info(f"Updated template: {template.id}")
 
     return TemplateResponse(
-        id=template.id,
+        id=str(template.id),
         name=template.name,
-        description=template.description,
-        instructions=template.instructions,
+        description=template.description or "",
+        instructions=template.instructions or "",
+        instruction_format=getattr(template, "instruction_format", None) or "text",
+        encouragement_words=getattr(template, "encouragement_words", None) or [],
         question_types=template.question_types or [],
         created_at=template.created_at,
         updated_at=template.updated_at,
-        usage_count=template.usage_count,
+        usage_count=template.usage_count or 0,
     )
 
 

@@ -127,7 +127,7 @@ export function Dashboard() {
               </div>
 
               <div>
-                <Label htmlFor="template">Grading Template</Label>
+                <Label htmlFor="template">Grading Instruction</Label>
                 <select
                   id="template"
                   value={selectedTemplate}
@@ -177,7 +177,7 @@ export function Dashboard() {
               </Button>
               <Button variant="outline" className="w-full justify-start" onClick={() => navigate("/templates")}>
                 <FileText className="mr-2 h-4 w-4" />
-                Manage Templates
+                Manage Instructions
               </Button>
               <Button variant="outline" className="w-full justify-start" onClick={() => navigate("/settings")}>
                 <FileText className="mr-2 h-4 w-4" />
@@ -202,7 +202,7 @@ export function Dashboard() {
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-primary">•</span>
-                  Create custom templates for different assignment types
+                  Create custom instructions for different assignment types
                 </li>
               </ul>
             </CardContent>

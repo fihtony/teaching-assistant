@@ -41,12 +41,16 @@ export interface QuestionTypeConfig {
   enabled: boolean;
 }
 
+// Instruction format for template instructions field
+export type InstructionFormat = "markdown" | "html" | "text" | "json";
+
 // Template/Grading Template
 export interface Template {
   id: string;
   name: string;
   description?: string;
   instructions?: string;
+  instruction_format?: InstructionFormat;
   question_types: QuestionTypeConfig[];
   encouragement_words: string[];
   is_default?: boolean;

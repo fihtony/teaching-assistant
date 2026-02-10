@@ -2,12 +2,23 @@
 Pydantic schemas for Template API.
 """
 
-from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 
 from app.schemas.assignment import QuestionType
+
+InstructionFormat = Union[str, None]
+VALID_INSTRUCTION_FORMATS = ("markdown", "html", "text", "json")
+
+
+class QuestionTypeItem(BaseModel):
+    """One question type with weight and enabled flag."""
+
+    type: str = Field(..., description="e.g. mcq, essay")
+    name: str = Field(..., description="Display name")
+    weight: int = Field(default=10, ge=0, le=100)
+    enabled: bool = Field(default=True)
 
 
 class TemplateBase(BaseModel):
@@ -16,7 +27,9 @@ class TemplateBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     instructions: str = Field(..., min_length=1)
-    question_types: List[QuestionType] = Field(default_factory=list)
+    instruction_format: str = Field(default="text", description="One of: markdown, html, text, json")
+    encouragement_words: List[str] = Field(default_factory=list)
+    question_types: List[Union[QuestionTypeItem, Dict[str, Any]]] = Field(default_factory=list)
 
 
 class TemplateCreate(TemplateBase):
@@ -31,19 +44,18 @@ class TemplateUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = None
     instructions: Optional[str] = Field(None, min_length=1)
-    question_types: Optional[List[QuestionType]] = None
+    instruction_format: Optional[str] = Field(None, description="One of: markdown, html, text, json")
+    encouragement_words: Optional[List[str]] = None
+    question_types: Optional[List[QuestionTypeItem]] = None
 
 
 class TemplateResponse(TemplateBase):
-    """Template response schema."""
+    """Template response schema. id/usage_count from DB are int; timestamps are ISO strings."""
 
-    id: str
-    created_at: datetime
-    updated_at: datetime
-    usage_count: str = "0"
-
-    class Config:
-        from_attributes = True
+    id: str  # Serialized from DB int for API
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    usage_count: int = 0
 
 
 class TemplateListResponse(BaseModel):

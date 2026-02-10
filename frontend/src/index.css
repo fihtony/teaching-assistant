@@ -119,3 +119,57 @@
 .annotation-encouragement {
   @apply text-purple-600 font-bold;
 }
+
+/* Markdown preview: line breaks, headings, lists, horizontal rule */
+.markdown-preview {
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+.markdown-preview h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-top: 0;
+  margin-bottom: 0.75rem;
+}
+.markdown-preview h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+.markdown-preview h3 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin-top: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+.markdown-preview p {
+  margin-bottom: 0.75rem;
+}
+.markdown-preview ul,
+.markdown-preview ol {
+  margin-bottom: 0.75rem;
+  padding-left: 1.5rem;
+}
+.markdown-preview ul {
+  list-style-type: disc;
+}
+.markdown-preview ol {
+  list-style-type: decimal;
+}
+.markdown-preview li {
+  margin-bottom: 0.25rem;
+}
+.markdown-preview hr {
+  border: 0;
+  border-top: 1px solid #e5e7eb;
+  margin: 1rem 0;
+}
+.markdown-preview strong {
+  font-weight: 600;
+}
+.markdown-preview br {
+  display: block;
+  content: "";
+  margin-top: 0.25rem;
+}

@@ -28,11 +28,16 @@ class GradingTemplate(Base):
 
     # Grading instructions
     instructions = Column(Text, nullable=False)
+    # Format of instructions: "markdown", "html", "text", "json"
+    instruction_format = Column(String(20), nullable=False, default="text")
 
-    # Applicable question types (JSON array)
+    # Encouragement words (JSON string array), e.g. ["Bravo!", "Excellent!", ...]
+    encouragement_words = Column(JSON, default=list)
+
+    # Question types (JSON array of {type, name, weight, enabled})
     question_types = Column(JSON, default=list)
     """
-    Example: ["essay", "mcq", "fill_blank", "true_false", "qa", "reading", "picture"]
+    Example: [{"type":"mcq","name":"Multiple Choice","weight":15,"enabled":true}, ...]
     """
 
     # Usage count for analytics

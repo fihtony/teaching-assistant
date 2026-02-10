@@ -228,7 +228,7 @@ export function EssayGradingPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div>
-                <Label htmlFor="template">Grading Template</Label>
+                <Label htmlFor="template">Grading Instruction</Label>
                 <select
                   id="template"
                   value={selectedTemplate}
