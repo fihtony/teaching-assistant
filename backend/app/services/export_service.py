@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 import json
 
+from bs4 import BeautifulSoup
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter, A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -60,6 +61,8 @@ class ExportService:
                 return SourceFormat.PDF
             elif source_format in (SourceFormat.DOCX, SourceFormat.DOC):
                 return SourceFormat.DOCX
+            elif source_format == SourceFormat.TXT:
+                return SourceFormat.DOCX  # Export graded TXT as DOCX
             else:
                 return SourceFormat.PDF
         elif requested_format == ExportFormat.PDF:
@@ -321,6 +324,72 @@ class ExportService:
 
         return docx_bytes, filename
 
+    def _html_to_pdf(self, html_content: str) -> bytes:
+        """Convert HTML fragment to PDF bytes (for HTML-only grading result)."""
+        try:
+            from xhtml2pdf import pisa
+        except ImportError:
+            logger.warning("xhtml2pdf not installed; cannot export HTML as PDF")
+            raise ValueError("PDF export from HTML requires xhtml2pdf. Install with: pip install xhtml2pdf")
+
+        # Wrap in full document; use only simple CSS (xhtml2pdf does not support attribute selectors)
+        doc = f"""<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><meta charset="utf-8"/><style>
+del {{ text-decoration: line-through; color: #b91c1c; }}
+.correction {{ color: #b91c1c; }}
+h2, h3 {{ font-weight: bold; margin-top: 1em; }}
+</style></head>
+<body>{html_content}</body>
+</html>"""
+        output = io.BytesIO()
+        pisa_status = pisa.CreatePDF(doc, dest=output, encoding="utf-8")
+        if pisa_status.err:
+            logger.error("xhtml2pdf reported errors during conversion")
+        pdf_bytes = output.getvalue()
+        output.close()
+        return pdf_bytes
+
+    def _html_to_docx(self, html_content: str, title: str) -> bytes:
+        """Convert HTML fragment to DOCX bytes (for HTML-only grading result)."""
+        from docx import Document
+
+        doc = Document()
+        doc.add_heading(f"Graded Assignment: {title}", 0)
+        doc.add_paragraph(f"Graded on: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        doc.add_paragraph()
+
+        soup = BeautifulSoup(html_content, "html.parser")
+        for el in soup.find_all(["h1", "h2", "h3", "p", "ul", "ol"]):
+            if el.name in ("h1", "h2", "h3"):
+                level = {"h1": 0, "h2": 1, "h3": 2}[el.name]
+                text = el.get_text(separator=" ", strip=True)
+                if text:
+                    doc.add_heading(text, level=level)
+            elif el.name == "p":
+                text = el.get_text(separator=" ", strip=True)
+                if text:
+                    doc.add_paragraph(text)
+            elif el.name in ("ul", "ol"):
+                for li in el.find_all("li", recursive=False):
+                    text = li.get_text(separator=" ", strip=True)
+                    if text:
+                        doc.add_paragraph(text, style="List Bullet")
+
+        # If no block elements found, add whole body as paragraphs
+        if len(doc.paragraphs) <= 2:
+            body = soup.get_text(separator="\n", strip=True)
+            if body:
+                for line in body.split("\n"):
+                    if line.strip():
+                        doc.add_paragraph(line.strip())
+
+        buffer = io.BytesIO()
+        doc.save(buffer)
+        docx_bytes = buffer.getvalue()
+        buffer.close()
+        return docx_bytes
+
     async def export(
         self,
         assignment: Assignment,
@@ -338,6 +407,26 @@ class ExportService:
         Returns:
             Tuple of (file bytes, filename, content_type).
         """
+        # When result is HTML-only (no structured items), convert to requested format
+        if grading_result.html_content and not grading_result.items:
+            base_name = Path(assignment.stored_filename).stem
+            title = assignment.title or assignment.original_filename
+            actual_format = self.determine_export_format(
+                assignment.source_format,
+                export_format,
+            )
+            if actual_format == SourceFormat.PDF:
+                content = self._html_to_pdf(grading_result.html_content)
+                filename = f"{base_name}_graded.pdf"
+                content_type = "application/pdf"
+            else:
+                content = self._html_to_docx(
+                    grading_result.html_content, title or base_name
+                )
+                filename = f"{base_name}_graded.docx"
+                content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            return content, filename, content_type
+
         actual_format = self.determine_export_format(
             assignment.source_format,
             export_format,

@@ -10,9 +10,10 @@ import type {
   AIConfigUpdate,
   TeacherProfile,
   Greeting,
-  // CachedArticle,
+  Group,
+  GroupWithStudents,
+  Student,
   PaginatedResponse,
-  // GradeRequest,
   BatchGradeRequest,
   ExportFormat,
 } from "@/types";
@@ -64,9 +65,12 @@ export const assignmentsApi = {
     return response.data;
   },
 
-  // Grade an assignment
-  grade: async (id: string): Promise<Assignment> => {
-    const response = await api.post(`/assignments/${id}/grade`);
+  // Grade an assignment (optional body: background, template_id for grading)
+  grade: async (
+    id: string,
+    body?: { background?: string; template_id?: number },
+  ): Promise<Assignment> => {
+    const response = await api.post(`/assignments/${id}/grade`, body ?? {});
     return response.data;
   },
 
@@ -239,6 +243,52 @@ export const cacheApi = {
   // Clear cache
   clear: async (): Promise<void> => {
     await api.delete("/cache");
+  },
+};
+
+// Groups API
+export const groupsApi = {
+  list: async (): Promise<Group[]> => {
+    const response = await api.get("/groups");
+    return response.data;
+  },
+  get: async (id: number): Promise<GroupWithStudents> => {
+    const response = await api.get(`/groups/${id}`);
+    return response.data;
+  },
+  create: async (data: { name: string; description?: string; goal?: string }): Promise<Group> => {
+    const response = await api.post("/groups", data);
+    return response.data;
+  },
+  update: async (id: number, data: Partial<Group>): Promise<Group> => {
+    const response = await api.patch(`/groups/${id}`, data);
+    return response.data;
+  },
+  delete: async (id: number): Promise<void> => {
+    await api.delete(`/groups/${id}`);
+  },
+};
+
+// Students API
+export const studentsApi = {
+  list: async (group_id?: number): Promise<Student[]> => {
+    const response = await api.get("/students", { params: group_id != null ? { group_id } : {} });
+    return response.data;
+  },
+  get: async (id: number): Promise<Student> => {
+    const response = await api.get(`/students/${id}`);
+    return response.data;
+  },
+  create: async (data: Partial<Student> & { name: string }): Promise<Student> => {
+    const response = await api.post("/students", data);
+    return response.data;
+  },
+  update: async (id: number, data: Partial<Student>): Promise<Student> => {
+    const response = await api.patch(`/students/${id}`, data);
+    return response.data;
+  },
+  delete: async (id: number): Promise<void> => {
+    await api.delete(`/students/${id}`);
   },
 };
 

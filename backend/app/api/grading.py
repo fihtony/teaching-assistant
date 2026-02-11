@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.config import get_storage_path
 from app.core.logging import get_logger
 from app.core.security import encrypt_api_key, get_current_teacher_id
 from app.core.datetime_utils import from_iso_datetime, get_now_with_timezone
@@ -110,19 +111,19 @@ async def upload_essay_file(
             detail=f"Unsupported file type. Allowed: {', '.join(allowed_extensions)}"
         )
 
-    # Save file
-    upload_dir = "data/uploads"
-    os.makedirs(upload_dir, exist_ok=True)
+    # Save file under project root data/uploads
+    upload_dir = get_storage_path("uploads")
+    upload_dir.mkdir(parents=True, exist_ok=True)
 
     file_id = f"{file.filename}_{datetime.now().timestamp()}"
-    file_path = os.path.join(upload_dir, f"{file_id}{file_ext}")
+    file_path = upload_dir / f"{file_id}{file_ext}"
 
     with open(file_path, "wb") as f:
         content = await file.read()
         f.write(content)
 
-    # Store file path for later retrieval
-    _grading_tasks[file_id] = {"file_path": file_path}
+    # Store file path for later retrieval (use str for JSON/serialization)
+    _grading_tasks[file_id] = {"file_path": str(file_path)}
 
     return {"file_id": file_id, "filename": file.filename}
 
@@ -187,14 +188,14 @@ async def download_grading(
     if not result:
         raise HTTPException(status_code=404, detail="Grading result not found")
 
-    # Generate HTML file path
-    output_dir = "data/graded"
+    # Generate HTML file under project root data/graded
+    output_dir = get_storage_path("graded")
     filename = f"{result.student_name.replace(' ', '_')}_{result.id}.html"
-    file_path = os.path.join(output_dir, filename)
+    file_path = output_dir / filename
 
     # Create file if it doesn't exist
-    if not os.path.exists(file_path):
-        os.makedirs(output_dir, exist_ok=True)
+    if not file_path.exists():
+        output_dir.mkdir(parents=True, exist_ok=True)
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(result.html_result)
 

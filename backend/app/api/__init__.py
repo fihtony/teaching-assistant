@@ -10,6 +10,8 @@ from app.api.settings import router as settings_router
 from app.api.greeting import router as greeting_router
 from app.api.cache import router as cache_router
 from app.api.grading import router as grading_router
+from app.api.groups import router as groups_router
+from app.api.students import router as students_router
 
 # Create main API router with v1 versioning
 api_router = APIRouter(prefix="/api/v1")
@@ -21,5 +23,7 @@ api_router.include_router(settings_router)
 api_router.include_router(greeting_router)
 api_router.include_router(cache_router)
 api_router.include_router(grading_router)
+api_router.include_router(groups_router)
+api_router.include_router(students_router)
 
 __all__ = ["api_router"]

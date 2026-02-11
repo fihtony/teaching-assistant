@@ -68,12 +68,11 @@ class AIGradingService:
         return self.db.query(Settings).filter(Settings.type == "ai-config").first()
 
     def _get_api_key(self, provider: str) -> Optional[str]:
-        """Get the API key for a provider."""
+        """Get the API key for a provider (from Settings type=ai-config)."""
         ai_config = self._get_ai_config()
         if not ai_config or not ai_config.config:
             return None
 
-        # API key would be stored in config if needed
         api_key = ai_config.config.get("api_key")
         if api_key:
             try:
@@ -83,6 +82,52 @@ class AIGradingService:
                 return None
 
         return None
+
+    @staticmethod
+    def _normalize_zhipu_model(model: str) -> str:
+        """
+        Normalize ZhipuAI model name to capitalized form (API is case-sensitive).
+        e.g. glm-4.7 -> GLM-4.7, glm-4-flash -> GLM-4-flash.
+        """
+        if not model:
+            return model
+        lower = model.strip().lower()
+        if lower.startswith("glm-"):
+            return "GLM-" + lower[4:]  # GLM-4.7, GLM-4-flash, etc.
+        return model
+
+    def _build_litellm_model_and_base(
+        self, provider: str, model: str
+    ) -> tuple[str, Optional[str], Optional[str]]:
+        """
+        Build LiteLLM model string (provider/model) and optional api_base from
+        database config (Settings type=ai-config). Returns (litellm_model, api_base, api_key).
+        """
+        ai_config = self._get_ai_config()
+        config = (ai_config.config or {}) if ai_config else {}
+        api_key = self._get_api_key(provider)
+
+        # ZhipuAI: use OpenAI-compatible endpoint with model name in capitalized form (e.g. GLM-4.7)
+        provider_lower = (provider or "").strip().lower()
+        if provider_lower in ("zhipuai", "zhipu"):
+            normalized = self._normalize_zhipu_model(model)
+            logger.debug("ZhipuAI model normalized to capitalized form: %s -> %s", model, normalized)
+            api_base = (
+                config.get("baseUrl")
+                or config.get("api_base")
+                or "https://open.bigmodel.cn/api/coding/paas/v4"
+            )
+            litellm_model = f"openai/{normalized}"
+            return litellm_model, api_base, api_key
+        if provider_lower == "openai":
+            return f"openai/{model}", None, api_key
+        if provider_lower == "anthropic":
+            return f"anthropic/{model}", None, api_key
+        if provider_lower in ("google", "gemini"):
+            return f"gemini/{model}", None, api_key
+        # Fallback: try openai/ with optional custom base from config
+        api_base = config.get("baseUrl") or config.get("api_base")
+        return f"openai/{model}", api_base, api_key
 
     async def _call_ai(
         self,
@@ -159,51 +204,30 @@ class AIGradingService:
                 if "cached_article_id" in article_data:
                     cached_article_ids.append(article_data["cached_article_id"])
 
-        # Build context understanding prompt
+        # Build context understanding prompt (background already includes any referenced articles)
         context_prompt = f"""
-You are an English teaching assistant helping a teacher grade assignments.
+You are an expert English teacher grading student assignments.
 
-Teacher's Background Information:
+Background Information:
 {background}
 
 Teacher's Grading Instructions:
 {instructions}
 
-Referenced Articles/Books Found:
-{json.dumps(fetched_articles, indent=2) if fetched_articles else "No specific articles found"}
-
-Please analyze this context and provide:
-1. A summary of what the assignment is about
-2. Key themes or concepts the teacher wants to assess
-3. Specific grading criteria based on the instructions
-4. Any relevant quotes or passages from the referenced material that might be useful
-
-Respond in JSON format:
-{{
-    "assignment_summary": "...",
-    "key_themes": ["theme1", "theme2"],
-    "grading_criteria": ["criteria1", "criteria2"],
-    "relevant_quotes": ["quote1", "quote2"]
-}}
+Summarize briefly the assignment context and key grading criteria.
 """
 
         try:
             response = await self._call_ai(
                 prompt=context_prompt,
-                system_prompt="You are an expert English teacher assistant. Analyze grading context carefully.",
+                system_prompt="You are an expert English teacher. Analyze grading context carefully.",
             )
-
-            # Parse JSON response
-            # Find JSON in response
-            json_match = re.search(r"\{[\s\S]*\}", response)
-            if json_match:
-                understanding = json.loads(json_match.group())
-            else:
-                understanding = {"raw_response": response}
+            # Use raw response as understanding (no JSON)
+            understanding = response.strip() if response else ""
 
         except Exception as e:
             logger.error(f"Context understanding error: {str(e)}")
-            understanding = {"error": str(e)}
+            understanding = f"Error: {str(e)}"
 
         return {
             "references": references,
@@ -228,59 +252,6 @@ Respond in JSON format:
         """
         return await self.build_grading_context(background, instructions, db)
 
-        # Build context understanding prompt
-        context_prompt = f"""
-You are an English teaching assistant helping a teacher grade assignments.
-
-Teacher's Background Information:
-{background}
-
-Teacher's Grading Instructions:
-{instructions}
-
-Referenced Articles/Books Found:
-{json.dumps(fetched_articles, indent=2) if fetched_articles else "No specific articles found"}
-
-Please analyze this context and provide:
-1. A summary of what the assignment is about
-2. Key themes or concepts the teacher wants to assess
-3. Specific grading criteria based on the instructions
-4. Any relevant quotes or passages from the referenced material that might be useful
-
-Respond in JSON format:
-{{
-    "assignment_summary": "...",
-    "key_themes": ["theme1", "theme2"],
-    "grading_criteria": ["criteria1", "criteria2"],
-    "relevant_quotes": ["quote1", "quote2"]
-}}
-"""
-
-        try:
-            response = await self._call_ai(
-                prompt=context_prompt,
-                system_prompt="You are an expert English teacher assistant. Analyze grading context carefully.",
-            )
-
-            # Parse JSON response
-            # Find JSON in response
-            json_match = re.search(r"\{[\s\S]*\}", response)
-            if json_match:
-                understanding = json.loads(json_match.group())
-            else:
-                understanding = {"raw_response": response}
-
-        except Exception as e:
-            logger.error(f"Context understanding error: {str(e)}")
-            understanding = {"error": str(e)}
-
-        return {
-            "references": references,
-            "fetched_articles": fetched_articles,
-            "cached_article_ids": cached_article_ids,
-            "understanding": understanding,
-        }
-
     async def grade_assignment(
         self,
         assignment: Assignment,
@@ -301,11 +272,16 @@ Respond in JSON format:
         extracted_text = assignment.extracted_text or ""
         background = assignment.background or ""
         instructions = assignment.instructions or ""
-        understanding = context.get("understanding", {})
+        understanding = context.get("understanding", "")
+        if isinstance(understanding, dict):
+            understanding = json.dumps(understanding, indent=2)
+        student_name = (assignment.title or "").strip() or "Student"
 
-        # Build grading prompt
+        # Build grading prompt (output as HTML, no JSON)
         grading_prompt = f"""
-You are grading an English assignment. Here's the context:
+You are an expert English teacher grading an English assignment. Here's the context:
+
+STUDENT NAME: {student_name}
 
 ASSIGNMENT BACKGROUND:
 {background}
@@ -314,104 +290,53 @@ GRADING INSTRUCTIONS:
 {instructions}
 
 CONTEXT UNDERSTANDING:
-{json.dumps(understanding, indent=2)}
+{understanding}
 
 STUDENT'S WORK:
 {extracted_text}
 
 QUESTION TYPES TO GRADE: {[qt.value for qt in question_types]}
 
-Please grade this assignment following these rules:
+Grade this assignment following these rules:
 1. For each question/section, determine if the answer is correct
 2. Provide specific, helpful comments for wrong answers
 3. Be encouraging but accurate
-4. For essays, evaluate content, grammar, and understanding
+4. For essays and writing, show corrections inline like a teacher's red pen
 
-Respond in JSON format:
-{{
-    "items": [
-        {{
-            "question_number": 1,
-            "question_type": "mcq|true_false|fill_blank|qa|reading|picture|essay",
-            "student_answer": "what the student wrote",
-            "correct_answer": "the correct answer (if applicable)",
-            "is_correct": true/false,
-            "comment": "feedback for the student"
-        }}
-    ],
-    "section_scores": {{
-        "mcq": {{"correct": 3, "total": 5}},
-        "essay": {{"correct": 1, "total": 1}}
-    }},
-    "overall_comment": "general feedback for the student"
-}}
+HTML format requirements (you MUST follow these so corrections are visible):
+- Student's wrong text (to be deleted): wrap in <del>wrong text</del>. It will display as black text with a red strikethrough (student's original stays black; only the teacher's correction is red).
+- Your correction or added text: wrap in <span class="correction">corrected text</span> or <span style="color: #b91c1c;">corrected text</span> (red text for teacher's feedback).
+- Use <p> for paragraphs. For section titles you MUST use <h2> with inline bold so they stand out, e.g. <h2 style="font-weight: bold;">Revised Essay</h2>, <h2 style="font-weight: bold;">Detailed Corrections</h2>, <h2 style="font-weight: bold;">Teacher's Comments</h2>. Leave a blank line before each <h2> so sections are clearly separated.
+- Keep student's correct text in normal black; only mark errors with <del> and your corrections in red.
+- Example: "Many people have <del>an answer about</del><span class=\"correction\">different opinions on</span> the topic."
+
+Respond with your grading as HTML only. Structure your output with these sections (each as <h2> with content below): (1) Revised Essay — student's work with strikethrough and red corrections inline; (2) Detailed Corrections — list of corrections with explanations; (3) Teacher's Comments — use <ul><li> for each point under "What You Did Well" and "Areas for Improvement" so each point has a bullet, and put the closing sentence (e.g. "Keep up the great work!") in a separate <p> after the lists so there is clear spacing before it. Example: <h2>Teacher's Comments</h2><h3>What You Did Well</h3><ul><li>First point.</li><li>Second point.</li></ul><h3>Areas for Improvement</h3><ul><li>First point.</li></ul><p>Keep up the great work!</p> Output only the HTML document fragment, no JSON and no markdown code fences.
 """
 
         try:
             response = await self._call_ai(
                 prompt=grading_prompt,
-                system_prompt="You are an expert English teacher. Grade fairly and provide constructive feedback.",
+                system_prompt="You are an expert English teacher. Grade fairly and provide constructive feedback. Output as HTML only. Use <del> for student's wrong text (it will show as black with red strikethrough) and <span class=\"correction\"> or red span for your corrections (red text). Student original text is always black; only teacher corrections are red.",
             )
 
-            # Handle None response
             if not response:
                 raise ValueError("AI grading service returned empty response")
 
-            # Parse JSON response
-            json_match = re.search(r"\{[\s\S]*\}", response)
-            if json_match:
-                grading_data = json.loads(json_match.group())
-            else:
-                raise ValueError("Could not parse grading response")
-
-            # Add encouragement words for perfect sections
-            section_scores = {}
-            for section_name, scores in grading_data.get("section_scores", {}).items():
-                encouragement = None
-                if (
-                    scores.get("correct") == scores.get("total")
-                    and scores.get("total", 0) > 0
-                ):
-                    import random
-
-                    encouragement = random.choice(ENCOURAGEMENT_WORDS)
-
-                section_scores[section_name] = SectionScore(
-                    correct=scores.get("correct", 0),
-                    total=scores.get("total", 0),
-                    encouragement=encouragement,
-                )
-
-            # Build result
-            items = []
-            for item_data in grading_data.get("items", []):
-                # Handle student_answer and correct_answer that might be dicts
-                student_answer = item_data.get("student_answer", "")
-                correct_answer = item_data.get("correct_answer")
-
-                # Convert dict answers to string representation
-                if isinstance(student_answer, dict):
-                    student_answer = json.dumps(student_answer)
-                if isinstance(correct_answer, dict):
-                    correct_answer = json.dumps(correct_answer)
-
-                items.append(
-                    GradingItemResult(
-                        question_number=item_data.get("question_number", 0),
-                        question_type=QuestionType(
-                            item_data.get("question_type", "qa")
-                        ),
-                        student_answer=str(student_answer) if student_answer else "",
-                        correct_answer=str(correct_answer) if correct_answer else None,
-                        is_correct=item_data.get("is_correct", False),
-                        comment=item_data.get("comment", ""),
-                    )
-                )
+            # Treat response as HTML (strip optional markdown code fence if present)
+            html_content = response.strip()
+            if html_content.startswith("```"):
+                # Remove opening ```html or ```
+                first_newline = html_content.find("\n")
+                if first_newline != -1:
+                    html_content = html_content[first_newline + 1 :]
+                if html_content.endswith("```"):
+                    html_content = html_content[:-3].strip()
 
             return GradingResult(
-                items=items,
-                section_scores=section_scores,
-                overall_comment=grading_data.get("overall_comment"),
+                items=[],
+                section_scores={},
+                overall_comment=None,
+                html_content=html_content,
             )
 
         except Exception as e:
@@ -501,27 +426,20 @@ Respond in JSON format:
         model: str,
     ) -> str:
         """
-        Call litellm for non-Copilot providers.
-
-        Args:
-            prompt: User prompt.
-            system_prompt: Optional system prompt.
-            provider: AI provider.
-            model: Model name.
-
-        Returns:
-            AI response text.
+        Call litellm for non-Copilot providers. Config (provider, model, baseUrl, api_key)
+        is read from database Settings table (type=ai-config). For ZhipuAI, model is
+        normalized to capitalized form (e.g. GLM-4.7).
         """
-        api_key = self._get_api_key(provider)
-        if not api_key:
+        litellm_model, api_base, api_key = self._build_litellm_model_and_base(
+            provider, model
+        )
+        if not api_key and (provider or "").lower() in ("zhipuai", "zhipu", "openai", "anthropic"):
             raise ValueError(f"No API key configured for provider: {provider}")
 
         litellm = self._get_litellm()
-
-        # Set API key
-        if provider == "openai":
+        if (provider or "").lower() == "openai" and api_key:
             litellm.openai_key = api_key
-        elif provider == "anthropic":
+        elif (provider or "").lower() == "anthropic" and api_key:
             litellm.anthropic_key = api_key
 
         messages = []
@@ -529,13 +447,33 @@ Respond in JSON format:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        ai_config = self._get_ai_config()
-        timeout = (ai_config.config or {}).get("timeout", 60) if ai_config else 60
-        response = await litellm.acompletion(
-            model=model,
-            messages=messages,
-            timeout=timeout,
+        logger.debug(
+            "AI request: system_prompt_len=%s, user_prompt_len=%s",
+            len(system_prompt) if system_prompt else 0,
+            len(prompt),
         )
+        if system_prompt:
+            logger.debug("AI request system_prompt: %s", system_prompt)
+        logger.debug("AI request user prompt: %s", prompt)
+
+        ai_config = self._get_ai_config()
+        # Default 300s for grading (long prompts); config can override.
+        raw_timeout = (ai_config.config or {}).get("timeout", 300) if ai_config else 300
+        timeout = max(300, int(raw_timeout)) if raw_timeout is not None else 300
+
+        kwargs = {
+            "model": litellm_model,
+            "messages": messages,
+            "timeout": timeout,
+        }
+        if api_base:
+            kwargs["api_base"] = api_base
+        if api_key:
+            kwargs["api_key"] = api_key
+            # When using custom api_base (e.g. ZhipuAI), set openai_key so the client sends Authorization
+            litellm.openai_key = api_key
+
+        response = await litellm.acompletion(**kwargs)
         return response.choices[0].message.content
 
     async def grade(
@@ -563,16 +501,28 @@ Respond in JSON format:
             db=self.db,
         )
 
-        # Save grading context
-        grading_context = GradingContext(
-            assignment_id=assignment.id,
-            raw_background=assignment.background,
-            extracted_references=context.get("references"),
-            search_results=None,  # Could store search results here
-            cached_article_ids=context.get("cached_article_ids"),
-            ai_understanding=json.dumps(context.get("understanding")),
+        # Save or update grading context (get-or-create to avoid UNIQUE on assignment_id on retry)
+        grading_context = (
+            self.db.query(GradingContext)
+            .filter(GradingContext.assignment_id == assignment.id)
+            .first()
         )
-        self.db.add(grading_context)
+        if grading_context:
+            grading_context.raw_background = assignment.background
+            grading_context.extracted_references = context.get("references")
+            grading_context.search_results = None
+            grading_context.cached_article_ids = context.get("cached_article_ids")
+            grading_context.ai_understanding = json.dumps(context.get("understanding"))
+        else:
+            grading_context = GradingContext(
+                assignment_id=assignment.id,
+                raw_background=assignment.background,
+                extracted_references=context.get("references"),
+                search_results=None,
+                cached_article_ids=context.get("cached_article_ids"),
+                ai_understanding=json.dumps(context.get("understanding")),
+            )
+            self.db.add(grading_context)
         self.db.commit()
 
         # Stage 2: Grade

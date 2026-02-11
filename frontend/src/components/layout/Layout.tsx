@@ -5,7 +5,7 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { Home, FileText, History, Settings, BookTemplate, Database } from "lucide-react";
+import { Home, FileText, History, Settings, BookTemplate, Database, Users } from "lucide-react";
 
 interface NavItem {
   label: string;
@@ -17,6 +17,7 @@ const navItems: NavItem[] = [
   { label: "Dashboard", href: "/", icon: <Home className="h-6 w-6" /> },
   { label: "Grade", href: "/grade", icon: <FileText className="h-6 w-6" /> },
   { label: "History", href: "/history", icon: <History className="h-6 w-6" /> },
+  { label: "Students", href: "/students", icon: <Users className="h-6 w-6" /> },
   { label: "Instructions", href: "/templates", icon: <BookTemplate className="h-6 w-6" /> },
   { label: "Settings", href: "/settings", icon: <Settings className="h-6 w-6" /> },
 ];

@@ -3,7 +3,7 @@
  */
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { assignmentsApi } from "@/services/api";
 import * as gradingApi from "@/services/gradingApi";
@@ -11,6 +11,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FileText, Search, ChevronLeft, ChevronRight, Eye, Download, Trash2, Filter, Sparkles } from "lucide-react";
+import type { Assignment } from "@/types";
+
+function formatTime(value: string | undefined): string {
+  if (!value) return "—";
+  try {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? value : d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+  } catch {
+    return value;
+  }
+}
 
 export function HistoryPage() {
   const navigate = useNavigate();
@@ -19,6 +30,22 @@ export function HistoryPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [activeTab, setActiveTab] = useState<"assignments" | "essays">("assignments");
+  const queryClient = useQueryClient();
+
+  const exportMutation = useMutation({
+    mutationFn: ({ id, format }: { id: string; format: "pdf" | "docx" }) =>
+      assignmentsApi.export(id, format),
+    onSuccess: (blob, { id, format }) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `graded-${id}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    },
+  });
 
   const { data, isLoading } = useQuery({
     queryKey: ["assignments", page, search, statusFilter],
@@ -122,42 +149,67 @@ export function HistoryPage() {
                   <p className="text-gray-500">No assignments found</p>
                 </div>
               ) : (
-                <div className="divide-y">
-                  {assignments.map((assignment: any) => (
-                    <div key={assignment.id} className="flex items-center justify-between py-4">
-                      <div className="flex items-center gap-4">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-100">
-                          <FileText className="h-5 w-5 text-gray-600" />
-                        </div>
-                        <div>
-                          <p className="font-medium text-gray-900">{assignment.student_name || "Unknown Student"}</p>
-                          <p className="text-sm text-gray-500">
-                            {new Date(assignment.created_at).toLocaleDateString()} • {assignment.source_format?.toUpperCase()}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-4">
-                        <StatusBadge status={assignment.status} />
-                        {assignment.total_score !== null && (
-                          <span className="text-lg font-semibold text-primary">{assignment.total_score}</span>
-                        )}
-                        <div className="flex items-center gap-1">
-                          <Button variant="ghost" size="icon" onClick={() => navigate(`/grade/${assignment.id}`)}>
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          {assignment.status === "completed" && (
-                            <Button variant="ghost" size="icon">
-                              <Download className="h-4 w-4" />
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-left text-gray-600">
+                        <th className="pb-2 pr-4 font-medium">Student name</th>
+                        <th className="pb-2 pr-4 font-medium">Essay topic</th>
+                        <th className="pb-2 pr-4 font-medium">Uploaded</th>
+                        <th className="pb-2 pr-4 font-medium">Graded</th>
+                        <th className="pb-2 pr-4 font-medium">AI model</th>
+                        <th className="pb-2 pr-4 font-medium">Status</th>
+                        <th className="pb-2 pr-4 font-medium">Format</th>
+                        <th className="pb-2 font-medium w-28">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {assignments.map((assignment: Assignment) => (
+                        <tr key={assignment.id} className="align-top">
+                          <td className="py-3 pr-4 font-medium text-gray-900">
+                            {assignment.title || assignment.student_name || "—"}
+                          </td>
+                          <td className="py-3 pr-4 text-gray-700 max-w-[200px] truncate" title={assignment.essay_topic ?? ""}>
+                            {assignment.essay_topic || "—"}
+                          </td>
+                          <td className="py-3 pr-4 text-gray-600">
+                            {formatTime(assignment.upload_time ?? assignment.created_at)}
+                          </td>
+                          <td className="py-3 pr-4 text-gray-600">
+                            {assignment.graded_at ? formatTime(assignment.graded_at) : "—"}
+                          </td>
+                          <td className="py-3 pr-4 text-gray-600">
+                            {assignment.grading_model || "—"}
+                          </td>
+                          <td className="py-3 pr-4">
+                            <StatusBadge status={assignment.status} />
+                          </td>
+                          <td className="py-3 pr-4 text-gray-600">
+                            {(assignment.source_format ?? "").toUpperCase()}
+                          </td>
+                          <td className="py-3 flex items-center gap-1">
+                            <Button variant="ghost" size="icon" onClick={() => navigate(`/grade/${assignment.id}`)} title="View">
+                              <Eye className="h-4 w-4" />
                             </Button>
-                          )}
-                          <Button variant="ghost" size="icon">
-                            <Trash2 className="h-4 w-4 text-red-500" />
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                            {assignment.status === "completed" && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => exportMutation.mutate({ id: String(assignment.id), format: "pdf" })}
+                                disabled={exportMutation.isPending}
+                                title="Download PDF"
+                              >
+                                <Download className="h-4 w-4" />
+                              </Button>
+                            )}
+                            <Button variant="ghost" size="icon" title="Delete">
+                              <Trash2 className="h-4 w-4 text-red-500" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
 

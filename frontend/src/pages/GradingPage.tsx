@@ -1,18 +1,35 @@
 /**
- * Grading page - view and interact with graded assignments
+ * Grading page - view and interact with graded assignments.
+ * Shows student homework and AI-graded output side by side (left and right).
  */
 
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { assignmentsApi } from "@/services/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Download, FileText, CheckCircle, AlertTriangle, Star, Sparkles } from "lucide-react";
 
+interface GradingItem {
+  question_number: number;
+  question_type: string;
+  student_answer: string;
+  correct_answer?: string;
+  is_correct: boolean;
+  comment: string;
+}
+
+interface GradingResults {
+  items?: GradingItem[];
+  section_scores?: Record<string, { correct: number; total: number; encouragement?: string }>;
+  overall_comment?: string;
+}
+
 export function GradingPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [exportFormat, setExportFormat] = useState<"pdf" | "docx">("pdf");
 
   const { data: assignment, isLoading } = useQuery({
@@ -23,6 +40,9 @@ export function GradingPage() {
 
   const gradeMutation = useMutation({
     mutationFn: () => assignmentsApi.grade(id!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["assignment", id] });
+    },
   });
 
   const exportMutation = useMutation({
@@ -32,7 +52,7 @@ export function GradingPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `graded-${assignment?.student_name || "assignment"}.${exportFormat}`;
+      a.download = `graded-${assignment?.title || assignment?.student_name || "assignment"}.${exportFormat}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -69,13 +89,13 @@ export function GradingPage() {
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">{assignment.student_name || "Student Assignment"}</h1>
+            <h1 className="text-2xl font-bold text-gray-900">{assignment.title || assignment.student_name || "Student Assignment"}</h1>
             <p className="text-sm text-gray-500">Uploaded: {new Date(assignment.created_at).toLocaleDateString()}</p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          {assignment.status === "pending" && (
+          {assignment.status !== "completed" && (
             <Button onClick={() => gradeMutation.mutate()} disabled={gradeMutation.isPending}>
               {gradeMutation.isPending ? (
                 <>
@@ -115,18 +135,17 @@ export function GradingPage() {
         <StatusBadge status={assignment.status} />
       </div>
 
-      {/* Main content */}
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* Original content */}
-        <Card className="lg:col-span-2">
+      {/* Side-by-side: Student homework (left) and AI-graded output (right) */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card className="flex flex-col">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5" />
-              Original Content
+              Student Homework
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="rounded-lg bg-gray-50 p-4">
+          <CardContent className="flex-1 min-h-0">
+            <div className="rounded-lg bg-gray-50 p-4 h-full overflow-auto max-h-[70vh]">
               <pre className="whitespace-pre-wrap text-sm text-gray-700">
                 {assignment.extracted_text || "Content extraction pending..."}
               </pre>
@@ -134,87 +153,58 @@ export function GradingPage() {
           </CardContent>
         </Card>
 
-        {/* Grading info */}
-        <div className="space-y-4">
-          {assignment.total_score !== null && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Star className="h-5 w-5 text-yellow-500" />
-                  Score
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-4xl font-bold text-primary">{assignment.total_score}</p>
-              </CardContent>
-            </Card>
-          )}
-
-          {assignment.background_info && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Background Info</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-gray-600">{assignment.background_info}</p>
-              </CardContent>
-            </Card>
-          )}
-
-          {assignment.grading_context && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Referenced Materials</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  {assignment.grading_context.articles?.map((article: any, i: number) => (
-                    <div key={i} className="rounded-lg border bg-gray-50 p-3 text-sm">
-                      <p className="font-medium">{article.title}</p>
-                      {article.author && <p className="text-gray-500">by {article.author}</p>}
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      </div>
-
-      {/* Graded content */}
-      {assignment.graded_content && (
-        <Card className="mt-6">
+        <Card className="flex flex-col">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <CheckCircle className="h-5 w-5 text-green-500" />
-              Graded Content
+              AI Graded Output
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: assignment.graded_content }} />
+          <CardContent className="flex-1 min-h-0">
+            <div className="rounded-lg border bg-gray-50 p-4 h-full overflow-auto max-h-[70vh]">
+              {assignment.graded_content ? (
+                <div
+                  className="graded-output prose prose-sm max-w-none"
+                  dangerouslySetInnerHTML={{ __html: assignment.graded_content }}
+                />
+              ) : assignment.grading_results ? (
+                <GradingResultsView results={assignment.grading_results as GradingResults} />
+              ) : assignment.status === "completed" ? (
+                <p className="text-gray-500">Grading results are available for export (PDF/Word).</p>
+              ) : (
+                <p className="text-gray-500">Complete grading to see AI feedback here.</p>
+              )}
+            </div>
           </CardContent>
         </Card>
-      )}
+      </div>
 
-      {/* Feedback */}
-      {assignment.feedback && (
-        <Card className="mt-6">
-          <CardHeader>
-            <CardTitle>Overall Feedback</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-gray-700">{assignment.feedback}</p>
-          </CardContent>
-        </Card>
-      )}
+      <div className="mt-6 flex flex-wrap items-center gap-4">
+        {assignment.total_score != null && (
+          <Card>
+            <CardContent className="flex items-center gap-2 pt-4">
+              <Star className="h-5 w-5 text-yellow-500" />
+              <span className="text-2xl font-bold text-primary">{assignment.total_score}</span>
+              <span className="text-sm text-gray-500">Score</span>
+            </CardContent>
+          </Card>
+        )}
+        {(assignment as { background?: string }).background && (
+          <p className="text-sm text-gray-600">
+            <span className="font-medium">Background:</span> {(assignment as { background?: string }).background}
+          </p>
+        )}
+      </div>
     </div>
   );
 }
 
 function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
+    uploaded: "bg-yellow-100 text-yellow-800",
     pending: "bg-yellow-100 text-yellow-800",
     processing: "bg-blue-100 text-blue-800",
+    grading: "bg-blue-100 text-blue-800",
     completed: "bg-green-100 text-green-800",
     failed: "bg-red-100 text-red-800",
   };
@@ -223,5 +213,45 @@ function StatusBadge({ status }: { status: string }) {
     <span className={`inline-flex rounded-full px-3 py-1 text-sm font-medium ${styles[status] || styles.pending}`}>
       {status.charAt(0).toUpperCase() + status.slice(1)}
     </span>
+  );
+}
+
+function GradingResultsView({ results }: { results: GradingResults }) {
+  const items = results.items ?? [];
+  const sectionScores = results.section_scores ?? {};
+  const overall = results.overall_comment;
+
+  return (
+    <div className="space-y-4 text-sm">
+      {Object.keys(sectionScores).length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {Object.entries(sectionScores).map(([key, s]) => (
+            <span key={key} className="rounded bg-gray-200 px-2 py-1">
+              {key}: {s.correct}/{s.total}
+              {s.encouragement ? ` — ${s.encouragement}` : ""}
+            </span>
+          ))}
+        </div>
+      )}
+      {items.map((item, i) => (
+        <div key={i} className="rounded border border-gray-200 p-3">
+          <p className="font-medium">
+            Q{item.question_number} ({item.question_type})
+          </p>
+          <p className="text-gray-700">Student: {item.student_answer}</p>
+          {item.correct_answer != null && <p className="text-gray-600">Correct: {item.correct_answer}</p>}
+          <p className={item.is_correct ? "text-green-600" : "text-red-600"}>
+            {item.is_correct ? "Correct" : "Incorrect"}
+          </p>
+          {item.comment && <p className="mt-1 text-gray-600">{item.comment}</p>}
+        </div>
+      ))}
+      {overall && (
+        <div className="rounded border border-primary/20 bg-primary/5 p-3">
+          <p className="font-medium text-primary">Overall comment</p>
+          <p className="text-gray-700">{overall}</p>
+        </div>
+      )}
+    </div>
   );
 }

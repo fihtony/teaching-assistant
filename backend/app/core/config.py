@@ -106,7 +106,10 @@ def get_backend_dir() -> Path:
 
 def get_storage_path(storage_type: str) -> Path:
     """
-    Get the absolute path for a storage directory.
+    Get the absolute path for a storage directory under project root data/.
+
+    All persistent data (uploads, graded output, templates, cache) live under
+    project_root/data/ so they are not under backend/ and survive across runs.
 
     Args:
         storage_type: One of 'uploads', 'graded', 'templates', 'cache'
@@ -115,7 +118,7 @@ def get_storage_path(storage_type: str) -> Path:
         Absolute path to the storage directory.
     """
     config = get_config()
-    backend_dir = get_backend_dir()
+    root = get_project_root()
 
     storage_map = {
         "uploads": config.storage.uploads_dir,
@@ -125,7 +128,7 @@ def get_storage_path(storage_type: str) -> Path:
     }
 
     relative_path = storage_map.get(storage_type, config.storage.uploads_dir)
-    absolute_path = (backend_dir / relative_path).resolve()
+    absolute_path = (root / relative_path).resolve()
     absolute_path.mkdir(parents=True, exist_ok=True)
 
     return absolute_path

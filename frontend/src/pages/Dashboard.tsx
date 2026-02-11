@@ -2,9 +2,10 @@
  * Dashboard page - main landing page with greeting and upload
  */
 
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import type { FileRejection } from "react-dropzone";
 import { GreetingBanner } from "@/components/common/GreetingBanner";
 import { FileUpload } from "@/components/common/FileUpload";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,14 +14,53 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { assignmentsApi, templatesApi } from "@/services/api";
+import { useNotification } from "@/contexts/NotificationContext";
 import { FileText, Clock, CheckCircle, AlertCircle, Upload, Sparkles } from "lucide-react";
+
+const DASHBOARD_ACCEPT = {
+  "text/plain": [".txt"],
+  "application/pdf": [".pdf"],
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+  "application/msword": [".doc"],
+};
+
+type ProgressStep =
+  | "uploading"
+  | "extracting"
+  | "preparing"
+  | "grading"
+  | "completed"
+  | null;
+
+const PROGRESS_LABELS: Record<NonNullable<ProgressStep>, string> = {
+  uploading: "Uploading file...",
+  extracting: "Extracting text...",
+  preparing: "Preparing grading instructions...",
+  grading: "AI grading...",
+  completed: "Completed",
+};
 
 export function Dashboard() {
   const navigate = useNavigate();
+  const { show: showNotification } = useNotification();
   const [files, setFiles] = useState<File[]>([]);
   const [backgroundInfo, setBackgroundInfo] = useState("");
   const [studentName, setStudentName] = useState("");
   const [selectedTemplate, setSelectedTemplate] = useState<string>("");
+  const [progressOpen, setProgressOpen] = useState(false);
+  const [progressStep, setProgressStep] = useState<ProgressStep>(null);
+  const [progressError, setProgressError] = useState<string | null>(null);
+
+  const handleUnsupportedFiles = useCallback(
+    (rejected: FileRejection[], acceptedFormatsLabel: string) => {
+      const names = rejected.map((r) => r.file.name).join(", ");
+      showNotification({
+        type: "warning",
+        message: `${names} ${rejected.length > 1 ? "are" : "is"} not supported. Only ${acceptedFormatsLabel} ${rejected.length > 1 ? "are" : "is"} supported.`,
+      });
+    },
+    [showNotification],
+  );
 
   const { data: templates } = useQuery({
     queryKey: ["templates"],
@@ -30,7 +70,6 @@ export function Dashboard() {
   const uploadMutation = useMutation({
     mutationFn: async () => {
       if (files.length === 1) {
-        // Single file upload
         return assignmentsApi.upload({
           file: files[0],
           student_name: studentName || undefined,
@@ -38,7 +77,6 @@ export function Dashboard() {
           template_id: selectedTemplate || undefined,
         });
       } else {
-        // Batch upload
         return assignmentsApi.batchUpload({
           files,
           background_info: backgroundInfo || undefined,
@@ -47,13 +85,19 @@ export function Dashboard() {
       }
     },
     onSuccess: (data) => {
-      // Navigate to grading page
-      if ("id" in data) {
-        navigate(`/grade/${data.id}`);
-      } else {
+      if (files.length !== 1) {
         navigate("/history");
       }
+      // When single file, progress dialog flow handles navigation
     },
+  });
+
+  const gradeMutation = useMutation({
+    mutationFn: ({ id, background, templateId }: { id: string; background?: string; templateId?: string }) =>
+      assignmentsApi.grade(id, {
+        background: background || undefined,
+        template_id: templateId || undefined,
+      }),
   });
 
   const handleFilesSelected = (newFiles: File[]) => {
@@ -64,13 +108,89 @@ export function Dashboard() {
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (files.length === 0) return;
+    if (files.length === 1) {
+      setProgressError(null);
+      setProgressOpen(true);
+      setProgressStep("uploading");
+      try {
+        const assignment = await uploadMutation.mutateAsync();
+        const id = String((assignment as { id: number }).id);
+        setProgressStep("extracting");
+        await new Promise((r) => setTimeout(r, 400));
+        setProgressStep("preparing");
+        await new Promise((r) => setTimeout(r, 300));
+        setProgressStep("grading");
+        await gradeMutation.mutateAsync({
+          id,
+          background: backgroundInfo || undefined,
+          templateId: selectedTemplate ? Number(selectedTemplate) : undefined,
+        });
+        setProgressStep("completed");
+        await new Promise((r) => setTimeout(r, 600));
+        navigate(`/grade/${id}`);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Something went wrong";
+        setProgressError(message);
+        showNotification({ type: "error", message });
+      } finally {
+        setProgressOpen(false);
+        setProgressStep(null);
+      }
+      return;
+    }
     uploadMutation.mutate();
   };
 
+  const isProcessing = uploadMutation.isPending || progressOpen;
+
   return (
     <div>
+      {/* Progress dialog for single-file grading */}
+      {progressOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <Card className="w-full max-w-md mx-4 shadow-xl">
+            <CardHeader>
+              <CardTitle>Grading in progress</CardTitle>
+              <CardDescription>
+                {progressError ? "An error occurred." : "Please wait while we process the assignment."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {progressError ? (
+                <p className="text-sm text-red-600">{progressError}</p>
+              ) : (
+                <ul className="space-y-2">
+                  {(["uploading", "extracting", "preparing", "grading", "completed"] as const).map((step) => {
+                    const isActive = progressStep === step;
+                    const order = ["uploading", "extracting", "preparing", "grading", "completed"] as const;
+                    const stepIndex = order.indexOf(step);
+                    const currentIndex = progressStep ? order.indexOf(progressStep) : -1;
+                    const isDoneStep = currentIndex > stepIndex || (step === "completed" && progressStep === "completed");
+                    return (
+                      <li
+                        key={step}
+                        className={`flex items-center gap-2 text-sm ${isActive ? "font-medium text-primary" : isDoneStep ? "text-gray-500" : "text-gray-400"}`}
+                      >
+                        {isDoneStep ? (
+                          <CheckCircle className="h-4 w-4 shrink-0 text-green-500" />
+                        ) : isActive ? (
+                          <Sparkles className="h-4 w-4 shrink-0 animate-spin text-primary" />
+                        ) : (
+                          <span className="h-4 w-4 shrink-0 rounded-full border-2 border-gray-300" />
+                        )}
+                        {PROGRESS_LABELS[step]}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       <GreetingBanner />
 
       {/* Stats overview */}
@@ -97,7 +217,10 @@ export function Dashboard() {
                 onFilesSelected={handleFilesSelected}
                 selectedFiles={files}
                 onRemoveFile={handleRemoveFile}
-                disabled={uploadMutation.isPending}
+                disabled={isProcessing}
+                accept={DASHBOARD_ACCEPT}
+                acceptedFormatsLabel="TXT, PDF, Word (.DOCX, .DOC)"
+                onUnsupportedFiles={handleUnsupportedFiles}
               />
 
               {files.length === 1 && (
@@ -143,8 +266,8 @@ export function Dashboard() {
                 </select>
               </div>
 
-              <Button onClick={handleSubmit} disabled={files.length === 0 || uploadMutation.isPending} className="w-full" size="lg">
-                {uploadMutation.isPending ? (
+              <Button onClick={handleSubmit} disabled={files.length === 0 || isProcessing} className="w-full" size="lg">
+                {isProcessing ? (
                   <>
                     <Sparkles className="mr-2 h-5 w-5 animate-spin" />
                     Processing...

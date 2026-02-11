@@ -38,6 +38,7 @@ class SourceFormatEnum(str, Enum):
     DOCX = "docx"
     DOC = "doc"
     IMAGE = "image"
+    TXT = "txt"
 
 
 class ExportFormat(str, Enum):
@@ -86,9 +87,10 @@ class SectionScore(BaseModel):
 class GradingResult(BaseModel):
     """Complete grading result for an assignment."""
 
-    items: List[GradingItemResult]
-    section_scores: Dict[str, SectionScore]
+    items: List[GradingItemResult] = Field(default_factory=list)
+    section_scores: Dict[str, SectionScore] = Field(default_factory=dict)
     overall_comment: Optional[str] = None
+    html_content: Optional[str] = None  # AI output as HTML when using HTML grading
 
 
 class GradeAssignmentRequest(BaseModel):
@@ -108,6 +110,15 @@ class GradeAssignmentRequest(BaseModel):
     question_types: Optional[List[QuestionType]] = Field(
         None, description="Types of questions in the assignment"
     )
+
+
+class GradeAssignmentByPathBody(BaseModel):
+    """Optional body for POST /assignments/{id}/grade."""
+
+    background: Optional[str] = None
+    instructions: Optional[str] = None
+    template_id: Optional[int] = None
+    question_types: Optional[List[QuestionType]] = None
 
 
 class BatchGradeRequest(BaseModel):
@@ -142,6 +153,8 @@ class AssignmentListItem(BaseModel):
     status: AssignmentStatusEnum
     upload_time: datetime
     graded_at: Optional[datetime] = None
+    essay_topic: Optional[str] = None  # First line of homework (extracted_text)
+    grading_model: Optional[str] = None  # AI model used e.g. GLM-4.7
 
     class Config:
         from_attributes = True
@@ -170,6 +183,7 @@ class AssignmentDetail(BaseModel):
     instructions: Optional[str] = None
     extracted_text: Optional[str] = None
     grading_results: Optional[GradingResult] = None
+    graded_content: Optional[str] = None  # HTML grading output (from grading_results.html_content)
 
     class Config:
         from_attributes = True

@@ -2,11 +2,13 @@
  * Essay Grading page - AI-powered essay grading with HTML output
  */
 
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import type { FileRejection } from "react-dropzone";
 import * as gradingApi from "@/services/gradingApi";
 import { templatesApi } from "@/services/api";
+import { useNotification } from "@/contexts/NotificationContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -15,10 +17,28 @@ import { Input } from "@/components/ui/input";
 import { FileUpload } from "@/components/common/FileUpload";
 import { FileText, Sparkles, Download, Eye, ArrowLeft, Loader2 } from "lucide-react";
 
+const ESSAY_ACCEPT = {
+  "text/plain": [".txt"],
+  "application/pdf": [".pdf"],
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+};
+
 export function EssayGradingPage() {
   const navigate = useNavigate();
+  const { show: showNotification } = useNotification();
   const [searchParams] = useSearchParams();
   const resultId = searchParams.get("result");
+
+  const handleUnsupportedFiles = useCallback(
+    (rejected: FileRejection[], acceptedFormatsLabel: string) => {
+      const names = rejected.map((r) => r.file.name).join(", ");
+      showNotification({
+        type: "warning",
+        message: `${names} ${rejected.length > 1 ? "are" : "is"} not supported. Only ${acceptedFormatsLabel} ${rejected.length > 1 ? "are" : "is"} supported.`,
+      });
+    },
+    [showNotification],
+  );
 
   const [studentName, setStudentName] = useState("");
   const [studentLevel, setStudentLevel] = useState("");
@@ -204,7 +224,9 @@ export function EssayGradingPage() {
                   selectedFiles={files}
                   onRemoveFile={handleRemoveFile}
                   disabled={uploadMutation.isPending}
-                  accept={{ "text/*": [".txt"], "application/pdf": [".pdf"], "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"] }}
+                  accept={ESSAY_ACCEPT}
+                  acceptedFormatsLabel="TXT, PDF, Word (.DOCX)"
+                  onUnsupportedFiles={handleUnsupportedFiles}
                 />
               )}
 
@@ -216,7 +238,9 @@ export function EssayGradingPage() {
                   selectedFiles={[]}
                   onRemoveFile={() => {}}
                   disabled={uploadMutation.isPending}
-                  accept={{ "text/*": [".txt"], "application/pdf": [".pdf"], "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"] }}
+                  accept={ESSAY_ACCEPT}
+                  acceptedFormatsLabel="TXT, PDF, Word (.DOCX)"
+                  onUnsupportedFiles={handleUnsupportedFiles}
                 />
               )}
             </CardContent>

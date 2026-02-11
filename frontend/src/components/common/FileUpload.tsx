@@ -2,8 +2,8 @@
  * File upload component with drag and drop support
  */
 
-import { useCallback } from "react";
-import { useDropzone } from "react-dropzone";
+import { useCallback, useMemo } from "react";
+import { useDropzone, type FileRejection } from "react-dropzone";
 import { Upload, File, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,22 @@ interface FileUploadProps {
   accept?: Record<string, string[]>;
   maxFiles?: number;
   disabled?: boolean;
+  /** Human-readable list of allowed formats, e.g. "TXT, PDF, Word (.docx, .doc)". Used in rejection notification. */
+  acceptedFormatsLabel?: string;
+  /** Called when user drops or selects unsupported files. If not provided, no notification is shown. */
+  onUnsupportedFiles?: (rejected: FileRejection[], acceptedFormatsLabel: string) => void;
+}
+
+/** Build a short label from accept map, e.g. "TXT, PDF, DOCX" */
+export function getAcceptedFormatsLabel(accept: Record<string, string[]>): string {
+  const exts = new Set<string>();
+  Object.values(accept).forEach((arr) => arr.forEach((e) => exts.add(e)));
+  return (
+    Array.from(exts)
+      .sort()
+      .map((e) => (e.startsWith(".") ? e.slice(1).toUpperCase() : e.toUpperCase()))
+      .join(", ") || "supported formats"
+  );
 }
 
 export function FileUpload({
@@ -30,7 +46,14 @@ export function FileUpload({
   },
   maxFiles = 10,
   disabled = false,
+  acceptedFormatsLabel,
+  onUnsupportedFiles,
 }: FileUploadProps) {
+  const formatsLabel = useMemo(
+    () => acceptedFormatsLabel ?? getAcceptedFormatsLabel(accept),
+    [accept, acceptedFormatsLabel],
+  );
+
   const onDrop = useCallback(
     (acceptedFiles: File[]) => {
       onFilesSelected(acceptedFiles);
@@ -38,8 +61,18 @@ export function FileUpload({
     [onFilesSelected],
   );
 
+  const onDropRejected = useCallback(
+    (rejected: FileRejection[]) => {
+      if (rejected.length > 0 && onUnsupportedFiles) {
+        onUnsupportedFiles(rejected, formatsLabel);
+      }
+    },
+    [onUnsupportedFiles, formatsLabel],
+  );
+
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
+    onDropRejected,
     accept,
     maxFiles,
     disabled,

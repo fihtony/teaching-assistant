@@ -135,6 +135,8 @@ def init_db():
         cached_article,
         grading_context,
         grading_history,
+        group,
+        student,
     )
     from app.core.seed_templates import seed_templates_from_instructions
 

@@ -28,6 +28,7 @@ class SourceFormat(str, Enum):
     DOCX = "docx"
     DOC = "doc"
     IMAGE = "image"
+    TXT = "txt"
 
 
 class Assignment(Base):
@@ -61,6 +62,7 @@ class Assignment(Base):
 
     # Grading results (JSON structure)
     grading_results = Column(JSON, nullable=True)
+    grading_model = Column(String(128), nullable=True)  # AI model used e.g. GLM-4.7
     """
     Grading results structure:
     {

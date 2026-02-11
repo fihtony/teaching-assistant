@@ -103,6 +103,63 @@
   animation: pulse-gentle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
+/* AI graded output: section headings bold with spacing (override prose) */
+.graded-output.prose h1,
+.graded-output.prose h2,
+.graded-output.prose h3 {
+  font-weight: 700 !important;
+  font-size: 1.25rem !important;
+  margin-top: 1.5em !important;
+  margin-bottom: 0.5em !important;
+  line-height: 1.3 !important;
+}
+.graded-output.prose h1:first-child,
+.graded-output.prose h2:first-child,
+.graded-output.prose h3:first-child {
+  margin-top: 0 !important;
+}
+.graded-output.prose h2 { font-size: 1.125rem !important; }
+.graded-output.prose h3 { font-size: 1rem !important; }
+.graded-output.prose p {
+  margin-top: 0;
+  margin-bottom: 0.75em;
+}
+/* Spacing before last paragraph (e.g. closing sentence) */
+.graded-output.prose p + p,
+.graded-output.prose ul + p,
+.graded-output.prose ol + p {
+  margin-top: 0.75em;
+}
+
+/* Lists: show bullets/numbers (override prose reset) */
+.graded-output.prose ul {
+  list-style-type: disc !important;
+  padding-left: 1.5em !important;
+  margin-top: 0.5em;
+  margin-bottom: 0.75em;
+}
+.graded-output.prose ol {
+  list-style-type: decimal !important;
+  padding-left: 1.5em !important;
+  margin-top: 0.5em;
+  margin-bottom: 0.75em;
+}
+.graded-output.prose li {
+  display: list-item !important;
+  margin-bottom: 0.35em;
+}
+
+/* Student original text black with red strikethrough, teacher corrections red */
+.graded-output del,
+.graded-output .error {
+  color: #111;
+  text-decoration: line-through;
+  text-decoration-color: #b91c1c;
+}
+.graded-output .correction {
+  color: #b91c1c;
+}
+
 /* Inline annotation styles */
 .annotation-correct {
   @apply text-green-600 bg-green-50 px-1 rounded;

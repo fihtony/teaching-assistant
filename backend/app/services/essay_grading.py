@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from types import SimpleNamespace
 
+from app.core.config import get_storage_path
 from app.core.logging import get_logger
 from app.core.security import decrypt_api_key
 from app.core.settings_db import ensure_settings_config
@@ -265,13 +266,10 @@ class EssayGradingService:
         Returns:
             Path to HTML file
         """
-        output_dir = Path("data/graded")
-        output_dir.mkdir(parents=True, exist_ok=True)
-
+        output_dir = get_storage_path("graded")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_name = student_name.replace(" ", "_").replace("/", "_")
         filename = f"{safe_name}_{timestamp}_graded.html"
-
         return str(output_dir / filename)
 
     def get_grading_history(

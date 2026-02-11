@@ -209,6 +209,21 @@ class OCRService:
             logger.error(f"DOCX extraction error for {docx_path}: {str(e)}")
             raise
 
+    def _read_txt(self, file_path: str) -> str:
+        """
+        Read plain text file (UTF-8).
+
+        Args:
+            file_path: Path to the .txt file.
+
+        Returns:
+            File content.
+        """
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Text file not found: {file_path}")
+        return path.read_text(encoding="utf-8")
+
     async def extract_text(
         self,
         file_path: str,
@@ -230,6 +245,8 @@ class OCRService:
             return self.extract_text_from_docx(file_path)
         elif source_format == SourceFormat.IMAGE:
             return self.extract_text_from_image(file_path)
+        elif source_format == SourceFormat.TXT:
+            return self._read_txt(file_path)
         else:
             raise ValueError(f"Unsupported format: {source_format}")
 

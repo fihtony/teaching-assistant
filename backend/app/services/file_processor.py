@@ -26,6 +26,7 @@ class FileProcessor:
         ".pdf": SourceFormat.PDF,
         ".docx": SourceFormat.DOCX,
         ".doc": SourceFormat.DOC,
+        ".txt": SourceFormat.TXT,
         ".png": SourceFormat.IMAGE,
         ".jpg": SourceFormat.IMAGE,
         ".jpeg": SourceFormat.IMAGE,
@@ -135,6 +136,7 @@ class FileProcessor:
             SourceFormat.PDF: ".pdf",
             SourceFormat.DOCX: ".docx",
             SourceFormat.DOC: ".docx",  # Convert to docx
+            SourceFormat.TXT: ".txt",
             SourceFormat.IMAGE: ".pdf",  # Convert images to PDF
         }
         ext = ext_map.get(output_format, ".pdf")

@@ -7,19 +7,19 @@ from typing import List, Optional
 import json
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
-import io
 
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.models import Assignment, AssignmentStatus, Teacher, DEFAULT_TEACHER_ID
+from app.models import Assignment, AssignmentStatus, Teacher, GradingTemplate, Settings, DEFAULT_TEACHER_ID
 from app.schemas import (
     AssignmentUploadResponse,
     AssignmentListResponse,
     AssignmentListItem,
     AssignmentDetail,
     GradeAssignmentRequest,
+    GradeAssignmentByPathBody,
     BatchGradeRequest,
     GradedAssignment,
     GradingResult,
@@ -54,12 +54,16 @@ def ensure_default_teacher(db: Session) -> Teacher:
 async def upload_assignment(
     file: UploadFile = File(...),
     title: Optional[str] = Form(None),
+    student_name: Optional[str] = Form(None),
+    background_info: Optional[str] = Form(None),
+    template_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
 ):
     """
     Upload an assignment file for grading.
 
-    Supports PDF, Word (.docx, .doc), and image files.
+    Supports text (.txt), PDF, Word (.docx, .doc), and image files.
+    Optional: student_name (stored as title), background_info, template_id for grading.
     """
     # Ensure default teacher exists
     teacher = ensure_default_teacher(db)
@@ -70,7 +74,7 @@ async def upload_assignment(
     if not file_processor.is_supported_format(file.filename):
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file format. Supported: PDF, DOCX, DOC, PNG, JPG, JPEG",
+            detail="Unsupported file format. Supported: TXT, PDF, DOCX, DOC, PNG, JPG, JPEG",
         )
 
     # Read file content
@@ -85,22 +89,27 @@ async def upload_assignment(
     # Get file size
     file_size = file_processor.get_file_size(stored_filename)
 
+    # Use student_name as title when provided
+    assignment_title = student_name or title
+
     # Create assignment record
     assignment = Assignment(
         teacher_id=teacher.id,
-        title=title,
+        title=assignment_title,
         original_filename=file.filename,
         stored_filename=stored_filename,
         source_format=source_format,
         file_size=file_size,
         status=AssignmentStatus.UPLOADED,
+        background=background_info,
+        template_id=template_id,
     )
 
     db.add(assignment)
     db.commit()
     db.refresh(assignment)
 
-    # Start OCR extraction in background (for now, do it synchronously)
+    # Extract text (synchronously so client can show "Extracting text..." then move on)
     try:
         ocr_service = get_ocr_service(db)
         extracted_text = await ocr_service.extract_text(file_path, source_format)
@@ -142,10 +151,19 @@ async def grade_assignment(
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found")
 
+    # Resolve instructions: use request.instructions, or load from template if template_id set (same as docs/old grading-system)
+    instructions = request.instructions or assignment.instructions
+    template_id = request.template_id if request.template_id is not None else assignment.template_id
+    if not (instructions or "").strip() and template_id is not None:
+        template = db.query(GradingTemplate).filter(GradingTemplate.id == template_id).first()
+        if template and (template.instructions or "").strip():
+            instructions = template.instructions
+            logger.debug("Loaded grading instructions from template id=%s name=%s", template_id, template.name)
+
     # Update assignment with grading info
     assignment.background = request.background
-    assignment.instructions = request.instructions
-    assignment.template_id = request.template_id
+    assignment.instructions = instructions
+    assignment.template_id = request.template_id if request.template_id is not None else assignment.template_id
     assignment.status = AssignmentStatus.GRADING
     db.commit()
 
@@ -159,10 +177,22 @@ async def grade_assignment(
             question_types=request.question_types,
         )
 
-        # Save results
+        # Save results and which AI model was used
         assignment.grading_results = result.model_dump()
         assignment.status = AssignmentStatus.COMPLETED
-        assignment.graded_at = datetime.utcnow()
+        assignment.graded_at = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S") if hasattr(datetime.utcnow(), "strftime") else str(datetime.utcnow())
+        ai_config = db.query(Settings).filter(Settings.type == "ai-config").first()
+        if ai_config and ai_config.config:
+            raw_model = ai_config.config.get("model") or ""
+            provider = (ai_config.config.get("provider") or "").lower()
+            if provider == "zhipuai" and raw_model:
+                raw_model = raw_model.strip()
+                if raw_model.lower().startswith("glm-"):
+                    assignment.grading_model = "GLM-" + raw_model[4:] if len(raw_model) > 4 else raw_model.upper()
+                else:
+                    assignment.grading_model = raw_model
+            else:
+                assignment.grading_model = raw_model or None
         db.commit()
 
         logger.info(f"Graded assignment: {assignment.id}")
@@ -246,6 +276,12 @@ async def get_assignment_history(
         .all()
     )
 
+    def first_line(text: Optional[str], max_len: int = 120) -> Optional[str]:
+        if not text or not text.strip():
+            return None
+        line = text.strip().split("\n")[0].strip()
+        return (line[:max_len] + "…") if len(line) > max_len else line
+
     items = [
         AssignmentListItem(
             id=a.id,
@@ -255,6 +291,8 @@ async def get_assignment_history(
             status=AssignmentStatusEnum(a.status.value),
             upload_time=a.created_at,
             graded_at=a.graded_at,
+            essay_topic=first_line(a.extracted_text),
+            grading_model=a.grading_model,
         )
         for a in assignments
     ]
@@ -265,6 +303,35 @@ async def get_assignment_history(
         page=page,
         page_size=page_size,
     )
+
+
+@router.post("/{assignment_id}/grade", response_model=GradedAssignment)
+async def grade_assignment_by_id(
+    assignment_id: str,
+    body: Optional[GradeAssignmentByPathBody] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Grade an assignment by ID. Request body is optional; if omitted, uses assignment's
+    stored background/template_id. Use this when frontend calls POST /assignments/{id}/grade.
+    """
+    try:
+        aid = int(assignment_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid assignment ID")
+    assignment = db.query(Assignment).filter(Assignment.id == aid).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    if body is None:
+        body = GradeAssignmentByPathBody()
+    request = GradeAssignmentRequest(
+        assignment_id=aid,
+        background=body.background or assignment.background,
+        instructions=body.instructions or assignment.instructions,
+        template_id=body.template_id if body.template_id is not None else assignment.template_id,
+        question_types=body.question_types,
+    )
+    return await grade_assignment(request, db)
 
 
 @router.get("/{assignment_id}", response_model=AssignmentDetail)
@@ -281,8 +348,10 @@ async def get_assignment(
         raise HTTPException(status_code=404, detail="Assignment not found")
 
     grading_results = None
+    graded_content = None
     if assignment.grading_results:
         grading_results = GradingResult(**assignment.grading_results)
+        graded_content = grading_results.html_content
 
     return AssignmentDetail(
         id=assignment.id,
@@ -296,6 +365,7 @@ async def get_assignment(
         instructions=assignment.instructions,
         extracted_text=assignment.extracted_text,
         grading_results=grading_results,
+        graded_content=graded_content,
     )
 
 
@@ -335,10 +405,13 @@ async def export_assignment(
     # Update assignment
     db.commit()
 
-    return StreamingResponse(
-        io.BytesIO(content),
+    return Response(
+        content=content,
         media_type=content_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(content)),
+        },
     )
 
 

@@ -14,20 +14,57 @@ export type SourceFormat = "pdf" | "docx" | "doc" | "image";
 // Export format
 export type ExportFormat = "pdf" | "docx";
 
+// Group
+export interface Group {
+  id: number;
+  name: string;
+  description?: string;
+  goal?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface GroupWithStudents extends Group {
+  students: Student[];
+}
+
+// Student
+export type Gender = "boy" | "girl";
+
+export interface Student {
+  id: number;
+  name: string;
+  age?: number;
+  gender?: Gender;
+  vocabulary?: string;
+  grade?: string;
+  group_id?: number;
+  additional_info?: string;
+  created_at?: string;
+  updated_at?: string;
+  group_name?: string;
+}
+
 // Assignment
 export interface Assignment {
   id: string;
+  title?: string;
   student_name?: string;
   filename: string;
   source_format: SourceFormat;
   status: AssignmentStatus;
-  created_at: string;
+  created_at?: string;
+  upload_time?: string;
   graded_at?: string;
+  essay_topic?: string;
+  grading_model?: string;
+  background?: string;
   background_info?: string;
   extracted_text?: string;
   graded_content?: string;
   feedback?: string;
   total_score?: number;
+  grading_results?: unknown;
   grading_context?: {
     articles?: Array<{ title: string; author?: string }>;
   };
