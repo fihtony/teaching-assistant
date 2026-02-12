@@ -1,10 +1,10 @@
 """
-Assignment model for storing uploaded assignments and grading results.
+Assignment model for storing uploaded assignments.
 """
 
 from enum import Enum
 
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, Enum as SQLEnum, JSON
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, Enum as SQLEnum
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -14,11 +14,11 @@ from app.core.datetime_utils import get_now_with_timezone
 class AssignmentStatus(str, Enum):
     """Assignment status enumeration."""
 
+    UPLOADING = "uploading"
     UPLOADED = "uploaded"
-    PROCESSING = "processing"
-    GRADING = "grading"
-    COMPLETED = "completed"
-    FAILED = "failed"
+    EXTRACTED = "extracted"
+    UPLOAD_FAILED = "upload_failed"
+    EXTRACT_FAILED = "extract_failed"
 
 
 class SourceFormat(str, Enum):
@@ -35,57 +35,34 @@ class Assignment(Base):
     """
     Assignment model.
 
-    Stores information about uploaded assignments, grading status,
-    and grading results. Uses auto-increment integer primary key.
+    Stores information about uploaded assignments (file and OCR state).
+    Grading runs are stored in ai_grading with grading_context.
     """
 
     __tablename__ = "assignments"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     teacher_id = Column(Integer, ForeignKey("teachers.id"), nullable=False)
+    student_id = Column(Integer, ForeignKey("students.id"), nullable=True)
+    student_name = Column(Text, nullable=True)  # Optional; teacher may grade without student profile
 
     # File information
-    title = Column(String(255), nullable=True)
     original_filename = Column(String(255), nullable=False)
     stored_filename = Column(String(255), nullable=False)
-    source_format = Column(SQLEnum(SourceFormat), nullable=False)
+    source_format = Column(
+        SQLEnum(SourceFormat, values_callable=lambda x: [m.value for m in x]),
+        nullable=False,
+    )
     file_size = Column(String(50), nullable=True)
 
     # OCR extracted content
     extracted_text = Column(Text, nullable=True)
 
-    # Grading information
-    status = Column(SQLEnum(AssignmentStatus), default=AssignmentStatus.UPLOADED)
-    background = Column(Text, nullable=True)  # Teacher-provided background info
-    instructions = Column(Text, nullable=True)  # Custom grading instructions
-    template_id = Column(Integer, ForeignKey("grading_templates.id"), nullable=True)
-
-    # Grading results (JSON structure)
-    grading_results = Column(JSON, nullable=True)
-    grading_model = Column(String(128), nullable=True)  # AI model used e.g. GLM-4.7
-    """
-    Grading results structure:
-    {
-        "items": [
-            {
-                "question_number": 1,
-                "question_type": "mcq",
-                "student_answer": "A",
-                "correct_answer": "B",
-                "is_correct": false,
-                "comment": "The correct answer is B because..."
-            }
-        ],
-        "section_scores": {
-            "mcq": {"correct": 3, "total": 5, "encouragement": null},
-            "fill_blank": {"correct": 5, "total": 5, "encouragement": "Excellent!"}
-        },
-        "overall_comment": "Good work overall..."
-    }
-    """
-
-    # Export information
-    graded_filename = Column(String(255), nullable=True)
+    # Status: upload/extract only (no grading state here). Use values for DB so stored "uploaded" etc. map correctly.
+    status = Column(
+        SQLEnum(AssignmentStatus, values_callable=lambda x: [m.value for m in x]),
+        default=AssignmentStatus.UPLOADED,
+    )
 
     # Timestamps with timezone - ISO 8601 format string
     created_at = Column(String, default=lambda: get_now_with_timezone().isoformat())
@@ -94,14 +71,12 @@ class Assignment(Base):
         default=lambda: get_now_with_timezone().isoformat(),
         onupdate=lambda: get_now_with_timezone().isoformat(),
     )
-    graded_at = Column(String, nullable=True)
 
     # Relationships
     teacher = relationship("Teacher", back_populates="assignments")
-    template = relationship("GradingTemplate", back_populates="assignments")
-    grading_context = relationship(
-        "GradingContext", back_populates="assignment", uselist=False
-    )
+    student = relationship("Student", back_populates="assignments")
+    grading_contexts = relationship("GradingContext", back_populates="assignment")
+    ai_gradings = relationship("AIGrading", back_populates="assignment")
 
     def __repr__(self) -> str:
-        return f"<Assignment(id={self.id}, title={self.title}, status={self.status})>"
+        return f"<Assignment(id={self.id}, status={self.status})>"

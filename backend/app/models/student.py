@@ -45,6 +45,7 @@ class Student(Base):
     )
 
     group = relationship("Group", back_populates="students")
+    assignments = relationship("Assignment", back_populates="student")
 
     def __repr__(self) -> str:
         return f"<Student(id={self.id}, name={self.name!r})>"

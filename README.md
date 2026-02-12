@@ -8,9 +8,9 @@ AI-powered assignment grading for English teachers. Supports multiple question t
 ./scripts/start.sh
 ```
 
-- **Frontend**: http://localhost:3090  
-- **Backend API**: http://localhost:8090  
-- **API docs**: http://localhost:8090/docs  
+- **Frontend**: http://localhost:3090
+- **Backend API**: http://localhost:8090
+- **API docs**: http://localhost:8090/docs
 
 ## Requirements
 
@@ -27,6 +27,14 @@ pip install -r requirements.txt
 # Frontend
 cd frontend && npm install
 ```
+
+**Initialize database (run once before first app launch):**
+
+```bash
+./scripts/init_db.sh
+```
+
+Or from backend: `cd backend && python -m scripts.init_db`. The app does not create or migrate the database on startup; run this step manually once.
 
 Run backend: `cd backend && source venv/bin/activate && python -m uvicorn main:app --host 0.0.0.0 --port 8090 --reload`  
 Run frontend: `cd frontend && npm run dev` (serves on port 3090)
@@ -52,4 +60,4 @@ MIT License. See [LICENSE](LICENSE).
 
 ## Author
 
-**Tony Xu** — fihtony@gmail.com
+**Tony Xu** — tony@tarch.ca

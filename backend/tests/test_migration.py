@@ -21,6 +21,8 @@ from app.core.database import init_db, drop_db, get_session_local
 from app.models import (
     Teacher,
     Assignment,
+    AssignmentStatus,
+    SourceFormat,
     GradingTemplate,
     Settings,
     CachedArticle,
@@ -113,12 +115,11 @@ def test_schema_migration():
         # Test 3: Assignment model with Integer FKs
         print("\n4️⃣  Testing Assignment model...")
         assignment = Assignment(
-            teacher_id=1,  # Integer FK
-            template_id=1,  # Will be created next
-            title="Essay Assignment",
+            teacher_id=1,
             original_filename="essay.pdf",
             stored_filename="stored_essay_001.pdf",
-            source_format="pdf",
+            source_format=SourceFormat.PDF,
+            status=AssignmentStatus.EXTRACTED,
         )
         db.add(assignment)
         db.flush()  # Get the auto-generated ID
@@ -159,15 +160,12 @@ def test_schema_migration():
         print(f"   ✓ Usage Count: {fetched_template.usage_count} (Integer type)")
         print(f"   ✓ Created at: {fetched_template.created_at} (ISO format)")
 
-        # Update assignment template_id to use created template
-        assignment.template_id = fetched_template.id
-        db.commit()
-
         # Test 5: GradingContext model
         print("\n6️⃣  Testing GradingContext model...")
         grading_context = GradingContext(
-            assignment_id=assignment.id,  # Integer FK
-            raw_background="Essay topic: climate change",
+            assignment_id=assignment.id,
+            title="Essay topic",
+            background="Essay topic: climate change",
         )
         db.add(grading_context)
         db.commit()

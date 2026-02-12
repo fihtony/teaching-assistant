@@ -20,19 +20,20 @@ from sqlalchemy.orm import Session
 from app.models import Settings
 
 
+# Free-tier-first: default to ZhipuAI (free tier available). Paid providers (OpenAI, Anthropic, Google Gemini) require user confirmation.
 def ensure_settings_config(db: Session) -> Settings:
-    """Ensure AI settings exist (type=ai-config). Defaults: provider=openai, model=gpt-4o, etc."""
+    """Ensure AI settings exist (type=ai-config). Defaults: provider=zhipuai (free tier), model=glm-4-flash."""
     config = db.query(Settings).filter(Settings.type == "ai-config").first()
     if not config:
         config = Settings(
             type="ai-config",
             config={
-                "provider": "openai",
-                "baseUrl": "https://api.openai.com/v1",
-                "model": "gpt-4o",
+                "provider": "zhipuai",
+                "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+                "model": "glm-4-flash",
                 "max_token": 4096,
                 "temperature": 0.3,
-                "timeout": 60,
+                "timeout": 300,
                 "max_retries": 3,
             },
         )

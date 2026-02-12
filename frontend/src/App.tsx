@@ -5,8 +5,7 @@
 import { useEffect } from "react";
 import { Routes, Route } from "react-router-dom";
 import { Layout } from "@/components/layout";
-import { Dashboard, GradingPage, HistoryPage, TemplatesPage, SettingsPage, StudentsPage } from "@/pages";
-import { EssayGradingPage } from "@/pages/EssayGradingPage";
+import { Dashboard, GradingResultPage, HistoryPage, TemplatesPage, SettingsPage, StudentsPage, GradingPage } from "@/pages";
 
 function App() {
   useEffect(() => {
@@ -20,8 +19,8 @@ function App() {
     <Layout>
       <Routes>
         <Route path="/" element={<Dashboard />} />
-        <Route path="/grade/:id" element={<GradingPage />} />
-        <Route path="/essay-grading" element={<EssayGradingPage />} />
+        <Route path="/grading" element={<GradingPage />} />
+        <Route path="/grade/:id" element={<GradingResultPage />} />
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/templates" element={<TemplatesPage />} />
         <Route path="/students" element={<StudentsPage />} />

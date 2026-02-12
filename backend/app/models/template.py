@@ -53,7 +53,7 @@ class GradingTemplate(Base):
 
     # Relationships
     teacher = relationship("Teacher", back_populates="templates")
-    assignments = relationship("Assignment", back_populates="template")
+    grading_contexts = relationship("GradingContext", back_populates="template")
 
     def __repr__(self) -> str:
         return f"<GradingTemplate(id={self.id}, name={self.name})>"

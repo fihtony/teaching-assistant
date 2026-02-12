@@ -6,7 +6,7 @@
 export type QuestionType = "mcq" | "true_false" | "fill_blank" | "qa" | "reading" | "picture" | "essay";
 
 // Assignment status
-export type AssignmentStatus = "pending" | "processing" | "completed" | "failed";
+export type AssignmentStatus = "uploaded" | "extracted" | "upload_failed" | "extract_failed";
 
 // Source format
 export type SourceFormat = "pdf" | "docx" | "doc" | "image";
@@ -45,29 +45,44 @@ export interface Student {
   group_name?: string;
 }
 
-// Assignment
+// Grade phase response (3-phase grading flow)
+export interface GradePhaseResponse {
+  phase: string;
+  assignment_id?: number;
+  context_id?: number;
+  ai_grading_id?: number;
+  status?: string;
+  elapsed_ms?: number;
+  error?: string;
+}
+
+// Assignment (list/detail from API)
 export interface Assignment {
-  id: string;
+  id: number | string;
   title?: string;
   student_name?: string;
+  template_display?: string;
+  display_status?: string;
+  display_date?: string;
   filename: string;
   source_format: SourceFormat;
   status: AssignmentStatus;
   created_at?: string;
+  updated_at?: string;
   upload_time?: string;
   graded_at?: string;
   essay_topic?: string;
   grading_model?: string;
+  latest_grading_status?: "grading" | "completed" | "failed";
   background?: string;
-  background_info?: string;
+  instructions?: string;
+  template_name?: string;
+  grading_time?: number;
+  ai_grading_status?: string;
   extracted_text?: string;
   graded_content?: string;
-  feedback?: string;
-  total_score?: number;
   grading_results?: unknown;
-  grading_context?: {
-    articles?: Array<{ title: string; author?: string }>;
-  };
+  total_score?: number;
 }
 
 // Question type config
@@ -174,7 +189,13 @@ export interface PaginatedResponse<T> {
   items: T[];
   total: number;
   page: number;
-  limit: number;
+  limit?: number;
+  page_size?: number;
+  status_options?: string[];
+}
+
+export interface AssignmentListResponse extends PaginatedResponse<Assignment> {
+  status_options: string[];
 }
 
 export interface GradeRequest {

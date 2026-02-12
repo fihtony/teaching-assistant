@@ -2,7 +2,7 @@
  * Dashboard page - main landing page with greeting and upload
  */
 
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type { FileRejection } from "react-dropzone";
@@ -12,10 +12,26 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { assignmentsApi, templatesApi } from "@/services/api";
+import { assignmentsApi, templatesApi, studentsApi } from "@/services/api";
 import { useNotification } from "@/contexts/NotificationContext";
 import { FileText, Clock, CheckCircle, AlertCircle, Upload, Sparkles } from "lucide-react";
+
+function formatElapsedMs(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+}
+
+function formatPhaseTime(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}m ${s}s`;
+}
 
 const DASHBOARD_ACCEPT = {
   "text/plain": [".txt"],
@@ -24,20 +40,14 @@ const DASHBOARD_ACCEPT = {
   "application/msword": [".doc"],
 };
 
-type ProgressStep =
-  | "uploading"
-  | "extracting"
-  | "preparing"
-  | "grading"
-  | "completed"
-  | null;
+type ProgressStep = "uploading" | "extracting" | "preparing" | "grading" | "completed" | null;
 
 const PROGRESS_LABELS: Record<NonNullable<ProgressStep>, string> = {
-  uploading: "Uploading file...",
-  extracting: "Extracting text...",
-  preparing: "Preparing grading instructions...",
-  grading: "AI grading...",
-  completed: "Completed",
+  uploading: "Uploading file",
+  extracting: "Analysing context",
+  preparing: "Analysing context",
+  grading: "AI grading",
+  completed: "Prepare report",
 };
 
 export function Dashboard() {
@@ -47,9 +57,15 @@ export function Dashboard() {
   const [backgroundInfo, setBackgroundInfo] = useState("");
   const [studentName, setStudentName] = useState("");
   const [selectedTemplate, setSelectedTemplate] = useState<string>("");
+  const [phaseTimes, setPhaseTimes] = useState<Record<string, number>>({});
   const [progressOpen, setProgressOpen] = useState(false);
   const [progressStep, setProgressStep] = useState<ProgressStep>(null);
   const [progressError, setProgressError] = useState<string | null>(null);
+  const [phaseElapsedMs, setPhaseElapsedMs] = useState<number | null>(null);
+  const [totalElapsedMs, setTotalElapsedMs] = useState(0);
+  const startTimeRef = useRef<number | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const cancelledRef = useRef(false);
 
   const handleUnsupportedFiles = useCallback(
     (rejected: FileRejection[], acceptedFormatsLabel: string) => {
@@ -65,6 +81,16 @@ export function Dashboard() {
   const { data: templates } = useQuery({
     queryKey: ["templates"],
     queryFn: templatesApi.list,
+  });
+
+  const { data: students = [] } = useQuery({
+    queryKey: ["students"],
+    queryFn: () => studentsApi.list(),
+  });
+
+  const { data: dashboardStats = { total_graded: 0, pending: 0, this_week: 0, needs_review: 0 } } = useQuery({
+    queryKey: ["dashboard-stats"],
+    queryFn: assignmentsApi.getStats,
   });
 
   const uploadMutation = useMutation({
@@ -108,35 +134,101 @@ export function Dashboard() {
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
+  // Update total elapsed every 500ms while progress dialog is open
+  useEffect(() => {
+    if (!progressOpen || progressError) return;
+    const start = startTimeRef.current;
+    if (start == null) return;
+    const interval = setInterval(() => {
+      setTotalElapsedMs(Date.now() - start);
+    }, 500);
+    return () => clearInterval(interval);
+  }, [progressOpen, progressError]);
+
+  const handleCancelGrading = useCallback(() => {
+    cancelledRef.current = true;
+    abortControllerRef.current?.abort();
+  }, []);
+
   const handleSubmit = async () => {
     if (files.length === 0) return;
     if (files.length === 1) {
       setProgressError(null);
+      setPhaseElapsedMs(null);
+      setTotalElapsedMs(0);
+      setPhaseTimes({});
       setProgressOpen(true);
       setProgressStep("uploading");
+      startTimeRef.current = Date.now();
+      cancelledRef.current = false;
+      abortControllerRef.current = new AbortController();
+      const signal = abortControllerRef.current.signal;
       try {
-        const assignment = await uploadMutation.mutateAsync();
-        const id = String((assignment as { id: number }).id);
+        const uploadRes = await assignmentsApi.gradeUploadPhase(
+          {
+            file: files[0],
+            student_name: studentName || undefined,
+            background: backgroundInfo || undefined,
+            template_id: selectedTemplate ? Number(selectedTemplate) : undefined,
+          },
+          signal,
+        );
+        if (cancelledRef.current) return;
+        if (uploadRes.error) {
+          setProgressError(uploadRes.error);
+          setPhaseElapsedMs(uploadRes.elapsed_ms ?? null);
+          return;
+        }
+        setPhaseElapsedMs(uploadRes.elapsed_ms ?? null);
+        if (uploadRes.elapsed_ms != null) {
+          setPhaseTimes((prev) => ({ ...prev, uploading: uploadRes.elapsed_ms as number }));
+        }
+        const assignmentId = uploadRes.assignment_id!;
         setProgressStep("extracting");
-        await new Promise((r) => setTimeout(r, 400));
-        setProgressStep("preparing");
-        await new Promise((r) => setTimeout(r, 300));
+        const analyzeRes = await assignmentsApi.analyzeContextPhase(assignmentId, signal);
+        if (cancelledRef.current) return;
+        if (analyzeRes.error) {
+          setProgressError(analyzeRes.error);
+          setPhaseElapsedMs(analyzeRes.elapsed_ms ?? null);
+          return;
+        }
+        setPhaseElapsedMs(analyzeRes.elapsed_ms ?? null);
+        if (analyzeRes.elapsed_ms != null) {
+          setPhaseTimes((prev) => ({ ...prev, extracting: analyzeRes.elapsed_ms as number }));
+        }
         setProgressStep("grading");
-        await gradeMutation.mutateAsync({
-          id,
-          background: backgroundInfo || undefined,
-          templateId: selectedTemplate ? Number(selectedTemplate) : undefined,
-        });
+        const runRes = await assignmentsApi.runGradingPhase(assignmentId, signal);
+        if (cancelledRef.current) return;
+        if (runRes.error) {
+          setProgressError(runRes.error);
+          setPhaseElapsedMs(runRes.elapsed_ms ?? null);
+          return;
+        }
+        setPhaseElapsedMs(runRes.elapsed_ms ?? null);
+        if (runRes.elapsed_ms != null) {
+          setPhaseTimes((prev) => ({ ...prev, grading: runRes.elapsed_ms as number }));
+        }
         setProgressStep("completed");
-        await new Promise((r) => setTimeout(r, 600));
-        navigate(`/grade/${id}`);
+        await new Promise((r) => setTimeout(r, 1500));
+        if (cancelledRef.current) return;
+        navigate(`/grade/${assignmentId}`);
       } catch (err: unknown) {
+        if (cancelledRef.current) return;
+        const isAbort =
+          err instanceof Error &&
+          (err.name === "CanceledError" || err.name === "AbortError" || (err as { code?: string }).code === "ERR_CANCELED");
+        if (isAbort) return;
         const message = err instanceof Error ? err.message : "Something went wrong";
         setProgressError(message);
         showNotification({ type: "error", message });
       } finally {
         setProgressOpen(false);
         setProgressStep(null);
+        setPhaseElapsedMs(null);
+        setTotalElapsedMs(0);
+        setPhaseTimes({});
+        startTimeRef.current = null;
+        abortControllerRef.current = null;
       }
       return;
     }
@@ -153,38 +245,61 @@ export function Dashboard() {
           <Card className="w-full max-w-md mx-4 shadow-xl">
             <CardHeader>
               <CardTitle>Grading in progress</CardTitle>
-              <CardDescription>
-                {progressError ? "An error occurred." : "Please wait while we process the assignment."}
-              </CardDescription>
+              <CardDescription>{progressError ? "An error occurred." : "Please wait while we process the assignment."}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {progressError ? (
-                <p className="text-sm text-red-600">{progressError}</p>
+                <div className="space-y-3">
+                  <p className="text-sm text-red-600">{progressError}</p>
+                  {phaseElapsedMs != null && <p className="text-xs text-gray-500">Elapsed: {(phaseElapsedMs / 1000).toFixed(1)}s</p>}
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setProgressOpen(false);
+                      setProgressError(null);
+                      setProgressStep(null);
+                    }}
+                  >
+                    Close
+                  </Button>
+                </div>
               ) : (
-                <ul className="space-y-2">
-                  {(["uploading", "extracting", "preparing", "grading", "completed"] as const).map((step) => {
-                    const isActive = progressStep === step;
-                    const order = ["uploading", "extracting", "preparing", "grading", "completed"] as const;
-                    const stepIndex = order.indexOf(step);
-                    const currentIndex = progressStep ? order.indexOf(progressStep) : -1;
-                    const isDoneStep = currentIndex > stepIndex || (step === "completed" && progressStep === "completed");
-                    return (
-                      <li
-                        key={step}
-                        className={`flex items-center gap-2 text-sm ${isActive ? "font-medium text-primary" : isDoneStep ? "text-gray-500" : "text-gray-400"}`}
-                      >
-                        {isDoneStep ? (
-                          <CheckCircle className="h-4 w-4 shrink-0 text-green-500" />
-                        ) : isActive ? (
-                          <Sparkles className="h-4 w-4 shrink-0 animate-spin text-primary" />
-                        ) : (
-                          <span className="h-4 w-4 shrink-0 rounded-full border-2 border-gray-300" />
-                        )}
-                        {PROGRESS_LABELS[step]}
-                      </li>
-                    );
-                  })}
-                </ul>
+                <div className="space-y-3">
+                  <ul className="space-y-2">
+                    {(["uploading", "extracting", "grading", "completed"] as const).map((step) => {
+                      const isActive = progressStep === step;
+                      const order = ["uploading", "extracting", "grading", "completed"] as const;
+                      const stepIndex = order.indexOf(step);
+                      const currentIndex = progressStep ? order.indexOf(progressStep) : -1;
+                      const isDoneStep = currentIndex > stepIndex || (step === "completed" && progressStep === "completed");
+                      const phaseTime = phaseTimes[step];
+                      return (
+                        <li
+                          key={step}
+                          className={`flex items-center gap-2 text-sm ${isActive ? "font-medium text-primary" : isDoneStep ? "text-gray-500" : "text-gray-400"}`}
+                        >
+                          {isDoneStep ? (
+                            <CheckCircle className="h-4 w-4 shrink-0 text-green-500" />
+                          ) : isActive ? (
+                            <Sparkles className="h-4 w-4 shrink-0 animate-spin text-primary" />
+                          ) : (
+                            <span className="h-4 w-4 shrink-0 rounded-full border-2 border-gray-300" />
+                          )}
+                          <span>
+                            {PROGRESS_LABELS[step]}
+                            {isDoneStep && phaseTime && <span className="ml-2 italic text-xs">- {formatPhaseTime(phaseTime)}</span>}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-gray-500">Total: {formatElapsedMs(totalElapsedMs)}</p>
+                    <Button variant="outline" size="sm" onClick={handleCancelGrading}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -195,10 +310,10 @@ export function Dashboard() {
 
       {/* Stats overview */}
       <div className="mb-8 grid gap-4 md:grid-cols-4">
-        <StatCard icon={<FileText className="h-5 w-5" />} label="Total Graded" value="128" color="blue" />
-        <StatCard icon={<Clock className="h-5 w-5" />} label="Pending" value="5" color="yellow" />
-        <StatCard icon={<CheckCircle className="h-5 w-5" />} label="This Week" value="23" color="green" />
-        <StatCard icon={<AlertCircle className="h-5 w-5" />} label="Needs Review" value="2" color="red" />
+        <StatCard icon={<FileText className="h-5 w-5" />} label="Total Graded" value={String(dashboardStats.total_graded)} color="blue" />
+        <StatCard icon={<Clock className="h-5 w-5" />} label="Pending" value={String(dashboardStats.pending)} color="yellow" />
+        <StatCard icon={<CheckCircle className="h-5 w-5" />} label="This Week" value={String(dashboardStats.this_week)} color="green" />
+        <StatCard icon={<AlertCircle className="h-5 w-5" />} label="Needs Review" value={String(dashboardStats.needs_review)} color="red" />
       </div>
 
       {/* Upload section */}
@@ -223,18 +338,25 @@ export function Dashboard() {
                 onUnsupportedFiles={handleUnsupportedFiles}
               />
 
-              {files.length === 1 && (
-                <div>
-                  <Label htmlFor="studentName">Student Name (optional)</Label>
-                  <Input
-                    id="studentName"
-                    value={studentName}
-                    onChange={(e) => setStudentName(e.target.value)}
-                    placeholder="Enter student name"
-                    className="mt-1"
-                  />
-                </div>
-              )}
+              <div>
+                <Label>Student Name</Label>
+                <select
+                  aria-label="Select student name"
+                  value={studentName}
+                  onChange={(e) => {
+                    setStudentName(e.target.value);
+                  }}
+                  disabled={isProcessing}
+                  className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option value="">-- Select a student --</option>
+                  {students.map((student) => (
+                    <option key={student.id} value={student.name}>
+                      {student.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
               <div>
                 <Label htmlFor="backgroundInfo">Background Information</Label>
@@ -250,14 +372,16 @@ export function Dashboard() {
               </div>
 
               <div>
-                <Label htmlFor="template">Grading Instruction</Label>
+                <Label htmlFor="template">Instruction template</Label>
                 <select
                   id="template"
+                  title="Instruction template"
                   value={selectedTemplate}
                   onChange={(e) => setSelectedTemplate(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  disabled={isProcessing}
+                  className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-400 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                 >
-                  <option value="">Default Template</option>
+                  <option value="">-- Select a template --</option>
                   {templates?.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.name}
@@ -266,7 +390,12 @@ export function Dashboard() {
                 </select>
               </div>
 
-              <Button onClick={handleSubmit} disabled={files.length === 0 || isProcessing} className="w-full" size="lg">
+              <Button
+                onClick={handleSubmit}
+                disabled={files.length === 0 || !studentName || !selectedTemplate || isProcessing}
+                className="w-full"
+                size="lg"
+              >
                 {isProcessing ? (
                   <>
                     <Sparkles className="mr-2 h-5 w-5 animate-spin" />
@@ -294,9 +423,9 @@ export function Dashboard() {
                 <FileText className="mr-2 h-4 w-4" />
                 View History
               </Button>
-              <Button variant="outline" className="w-full justify-start" onClick={() => navigate("/essay-grading")}>
+              <Button variant="outline" className="w-full justify-start" onClick={() => navigate("/grading")}>
                 <FileText className="mr-2 h-4 w-4" />
-                New Essay Grading
+                Assignment Grading
               </Button>
               <Button variant="outline" className="w-full justify-start" onClick={() => navigate("/templates")}>
                 <FileText className="mr-2 h-4 w-4" />

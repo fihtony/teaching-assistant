@@ -4,20 +4,19 @@ AI grading service for intelligent assignment grading.
 
 import json
 from datetime import datetime
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Union
 import re
 
 from sqlalchemy.orm import Session
 
+from app.core.ai_config import get_resolved_ai_config
 from app.core.logging import get_logger
-from app.core.security import decrypt_api_key
-from app.core.settings_db import ensure_settings_config
 from app.models import (
     Assignment,
-    Settings,
     GradingContext,
     CachedArticle,
 )
+from app.services.ai_providers import get_llm_provider
 from app.schemas.assignment import (
     QuestionType,
     GradingResult,
@@ -25,6 +24,7 @@ from app.schemas.assignment import (
     SectionScore,
 )
 from app.services.search_service import get_search_service
+from app.services.ai_prompts import GRADING_CONTEXT_PROMPT, GRADING_PROMPT
 
 logger = get_logger()
 
@@ -53,81 +53,6 @@ class AIGradingService:
 
     def __init__(self, db: Session):
         self.db = db
-        self._litellm = None
-
-    def _get_litellm(self):
-        """Lazy load litellm module."""
-        if self._litellm is None:
-            import litellm
-
-            self._litellm = litellm
-        return self._litellm
-
-    def _get_ai_config(self) -> Optional[Settings]:
-        """Get the AI configuration from database."""
-        return self.db.query(Settings).filter(Settings.type == "ai-config").first()
-
-    def _get_api_key(self, provider: str) -> Optional[str]:
-        """Get the API key for a provider (from Settings type=ai-config)."""
-        ai_config = self._get_ai_config()
-        if not ai_config or not ai_config.config:
-            return None
-
-        api_key = ai_config.config.get("api_key")
-        if api_key:
-            try:
-                return decrypt_api_key(api_key) if isinstance(api_key, str) else api_key
-            except Exception as e:
-                logger.error(f"Error decrypting API key for {provider}: {str(e)}")
-                return None
-
-        return None
-
-    @staticmethod
-    def _normalize_zhipu_model(model: str) -> str:
-        """
-        Normalize ZhipuAI model name to capitalized form (API is case-sensitive).
-        e.g. glm-4.7 -> GLM-4.7, glm-4-flash -> GLM-4-flash.
-        """
-        if not model:
-            return model
-        lower = model.strip().lower()
-        if lower.startswith("glm-"):
-            return "GLM-" + lower[4:]  # GLM-4.7, GLM-4-flash, etc.
-        return model
-
-    def _build_litellm_model_and_base(
-        self, provider: str, model: str
-    ) -> tuple[str, Optional[str], Optional[str]]:
-        """
-        Build LiteLLM model string (provider/model) and optional api_base from
-        database config (Settings type=ai-config). Returns (litellm_model, api_base, api_key).
-        """
-        ai_config = self._get_ai_config()
-        config = (ai_config.config or {}) if ai_config else {}
-        api_key = self._get_api_key(provider)
-
-        # ZhipuAI: use OpenAI-compatible endpoint with model name in capitalized form (e.g. GLM-4.7)
-        provider_lower = (provider or "").strip().lower()
-        if provider_lower in ("zhipuai", "zhipu"):
-            normalized = self._normalize_zhipu_model(model)
-            logger.debug("ZhipuAI model normalized to capitalized form: %s -> %s", model, normalized)
-            api_base = (
-                config.get("baseUrl")
-                or config.get("api_base")
-                or "https://open.bigmodel.cn/api/coding/paas/v4"
-            )
-            litellm_model = f"openai/{normalized}"
-            return litellm_model, api_base, api_key
-        if provider_lower == "openai":
-            return f"openai/{model}", None, api_key
-        if provider_lower == "anthropic":
-            return f"anthropic/{model}", None, api_key
-        if provider_lower in ("google", "gemini"):
-            return f"gemini/{model}", None, api_key
-        # Fallback: try openai/ with optional custom base from config
-        api_base = config.get("baseUrl") or config.get("api_base")
-        return f"openai/{model}", api_base, api_key
 
     async def _call_ai(
         self,
@@ -137,35 +62,19 @@ class AIGradingService:
         model: Optional[str] = None,
     ) -> str:
         """
-        Call the AI model with the given prompt.
-
-        Args:
-            prompt: User prompt.
-            system_prompt: Optional system prompt.
-            provider: AI provider (openai, anthropic, google, copilot).
-            model: Model name.
-
-        Returns:
-            AI response text.
+        Call the AI model using the user-defined provider and model from settings.
+        All modules use the common LLM provider interface; provider/model args are ignored.
         """
-        ai_config = self._get_ai_config()
-        defaults = ensure_settings_config(self.db).config or {}
-
-        if provider is None:
-            ai_config_data = ai_config.config if ai_config else {}
-            provider = ai_config_data.get("provider") or defaults.get("provider", "openai")
-        if model is None:
-            ai_config_data = ai_config.config if ai_config else {}
-            model = ai_config_data.get("model") or defaults.get("model", "gpt-4o")
-
-        logger.info(f"Calling AI: provider={provider}, model={model}")
-
-        # Handle copilot provider with Copilot Bridge
-        if provider == "copilot":
-            return await self._call_copilot_bridge(prompt, system_prompt, model)
-
-        # For other providers, use litellm
-        return await self._call_litellm(prompt, system_prompt, provider, model)
+        llm = get_llm_provider(self.db)
+        config = get_resolved_ai_config(self.db)
+        timeout = config.get("timeout", 300)
+        timeout = max(300, int(timeout)) if timeout is not None else 300
+        logger.info("Calling AI: provider=%s, model=%s", config.get("provider"), config.get("model"))
+        return await llm.complete(
+            prompt,
+            system_prompt=system_prompt,
+            timeout=timeout,
+        )
 
     async def build_grading_context(
         self, background: str, instructions: str, db: Session
@@ -270,12 +179,18 @@ Summarize briefly the assignment context and key grading criteria.
             GradingResult with detailed grading.
         """
         extracted_text = assignment.extracted_text or ""
-        background = assignment.background or ""
-        instructions = assignment.instructions or ""
+        background = context.get("background", "") or ""
+        instructions = context.get("instructions", "") or ""
         understanding = context.get("understanding", "")
         if isinstance(understanding, dict):
             understanding = json.dumps(understanding, indent=2)
-        student_name = (assignment.title or "").strip() or "Student"
+        student_name = (context.get("student_name") or "").strip()
+        if not student_name and getattr(assignment, "student_name", None):
+            student_name = (assignment.student_name or "").strip()
+        if not student_name and getattr(assignment, "student", None) and assignment.student:
+            student_name = (assignment.student.name or "").strip()
+        if not student_name:
+            student_name = "Student"
 
         # Build grading prompt (output as HTML, no JSON)
         grading_prompt = f"""
@@ -343,138 +258,59 @@ Respond with your grading as HTML only. Structure your output with these section
             logger.error(f"Grading error: {str(e)}")
             raise
 
-    async def _call_copilot_bridge(
+    @staticmethod
+    def _understanding_to_lines(understanding: Union[str, dict, None]) -> Optional[str]:
+        """Format understanding as line-by-line text."""
+        if understanding is None:
+            return None
+        if isinstance(understanding, str):
+            return understanding.strip() or None
+        if isinstance(understanding, dict):
+            lines = []
+            for k, v in understanding.items():
+                if isinstance(v, (list, dict)):
+                    lines.append(f"{k}: {json.dumps(v, ensure_ascii=False)}")
+                else:
+                    lines.append(f"{k}: {v}")
+            return "\n".join(lines) if lines else None
+        return str(understanding)
+
+    async def grade_with_context(
         self,
-        prompt: str,
-        system_prompt: Optional[str] = None,
-        model: Optional[str] = None,
-    ) -> str:
+        assignment: Assignment,
+        context: GradingContext,
+        question_types: Optional[List[QuestionType]] = None,
+    ) -> GradingResult:
         """
-        Call Copilot Bridge API directly.
-
-        Args:
-            prompt: User prompt.
-            system_prompt: Optional system prompt.
-            model: Optional model ID.
-
-        Returns:
-            AI response text.
+        Grade using an existing GradingContext (title, background, instructions).
+        Updates context with ai_understanding (line-by-line) and returns result.
         """
-        try:
-            from app.services.copilot_bridge_client import CopilotBridgeClient
-            import asyncio
+        if question_types is None:
+            question_types = [QuestionType.ESSAY]
 
-            # Create Copilot Bridge client with session management
-            client = CopilotBridgeClient(host="localhost", port=1287)
-
-            # Create a new session for each request to avoid connection issues
-            session_id = client.create_session()
-            if not session_id:
-                logger.warning(
-                    "Failed to create Copilot session, continuing without session"
-                )
-
-            # Combine system and user prompts
-            full_prompt = prompt
-            if system_prompt:
-                full_prompt = f"{system_prompt}\n\n{prompt}"
-
-            # Call Copilot Bridge in thread pool to avoid blocking
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: client.query(
-                    full_prompt,
-                    context=None,
-                    timeout=60,  # Increase to 60 seconds for longer prompts
-                    model_id=model,
-                ),
-            )
-
-            # Clean up session
-            try:
-                client.close_session()
-            except Exception as e:
-                logger.warning(f"Failed to close session: {str(e)}")
-
-            if not response:
-                logger.error(
-                    "Copilot returned empty response, retrying with fallback..."
-                )
-                # Try once more without a session
-                client2 = CopilotBridgeClient(host="localhost", port=1287)
-                response = await loop.run_in_executor(
-                    None,
-                    lambda: client2.query(
-                        full_prompt, context=None, timeout=60, model_id=model
-                    ),
-                )
-
-            if not response:
-                raise ValueError("Copilot returned empty response")
-
-            return response
-        except Exception as e:
-            logger.error(f"Copilot Bridge call error: {str(e)}")
-            raise
-
-    async def _call_litellm(
-        self,
-        prompt: str,
-        system_prompt: Optional[str],
-        provider: str,
-        model: str,
-    ) -> str:
-        """
-        Call litellm for non-Copilot providers. Config (provider, model, baseUrl, api_key)
-        is read from database Settings table (type=ai-config). For ZhipuAI, model is
-        normalized to capitalized form (e.g. GLM-4.7).
-        """
-        litellm_model, api_base, api_key = self._build_litellm_model_and_base(
-            provider, model
+        # Stage 1: Build context dict (references + understanding)
+        context_dict = await self.build_grading_context(
+            background=context.background or "",
+            instructions=context.instructions or "",
+            db=self.db,
         )
-        if not api_key and (provider or "").lower() in ("zhipuai", "zhipu", "openai", "anthropic"):
-            raise ValueError(f"No API key configured for provider: {provider}")
+        # Persist to ORM context
+        context.extracted_references = context_dict.get("references")
+        context.search_results = None
+        context.cached_article_ids = context_dict.get("cached_article_ids")
+        context.ai_understanding = self._understanding_to_lines(context_dict.get("understanding"))
+        self.db.commit()
 
-        litellm = self._get_litellm()
-        if (provider or "").lower() == "openai" and api_key:
-            litellm.openai_key = api_key
-        elif (provider or "").lower() == "anthropic" and api_key:
-            litellm.anthropic_key = api_key
+        # Pass background, instructions, student_name for grading prompt
+        context_dict["background"] = context.background or ""
+        context_dict["instructions"] = context.instructions or ""
+        student_name = (assignment.student_name or "").strip() if getattr(assignment, "student_name", None) else ""
+        if not student_name and getattr(assignment, "student", None) and assignment.student:
+            student_name = (assignment.student.name or "").strip()
+        context_dict["student_name"] = student_name
 
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-
-        logger.debug(
-            "AI request: system_prompt_len=%s, user_prompt_len=%s",
-            len(system_prompt) if system_prompt else 0,
-            len(prompt),
-        )
-        if system_prompt:
-            logger.debug("AI request system_prompt: %s", system_prompt)
-        logger.debug("AI request user prompt: %s", prompt)
-
-        ai_config = self._get_ai_config()
-        # Default 300s for grading (long prompts); config can override.
-        raw_timeout = (ai_config.config or {}).get("timeout", 300) if ai_config else 300
-        timeout = max(300, int(raw_timeout)) if raw_timeout is not None else 300
-
-        kwargs = {
-            "model": litellm_model,
-            "messages": messages,
-            "timeout": timeout,
-        }
-        if api_base:
-            kwargs["api_base"] = api_base
-        if api_key:
-            kwargs["api_key"] = api_key
-            # When using custom api_base (e.g. ZhipuAI), set openai_key so the client sends Authorization
-            litellm.openai_key = api_key
-
-        response = await litellm.acompletion(**kwargs)
-        return response.choices[0].message.content
+        # Stage 2: Grade
+        return await self.grade_assignment(assignment, context_dict, question_types)
 
     async def grade(
         self,
@@ -482,53 +318,117 @@ Respond with your grading as HTML only. Structure your output with these section
         question_types: Optional[List[QuestionType]] = None,
     ) -> GradingResult:
         """
-        Full grading pipeline: understand context, then grade.
-
-        Args:
-            assignment: Assignment to grade.
-            question_types: Types of questions (optional, will detect if not provided).
-
-        Returns:
-            GradingResult.
+        Legacy: full pipeline with background/instructions from assignment.
+        Prefer grade_with_context when using GradingContext ORM.
         """
         if question_types is None:
-            question_types = [QuestionType.ESSAY]  # Default to essay
-
-        # Stage 1: Understand context
-        context = await self.understand_context(
-            background=assignment.background or "",
-            instructions=assignment.instructions or "",
-            db=self.db,
+            question_types = [QuestionType.ESSAY]
+        background = getattr(assignment, "background", None) or ""
+        instructions = getattr(assignment, "instructions", None) or ""
+        context_dict = await self.understand_context(background=background, instructions=instructions, db=self.db)
+        context_dict["background"] = background
+        context_dict["instructions"] = instructions
+        context_dict["student_name"] = (getattr(assignment, "student_name", None) or "").strip() or (
+            (assignment.student.name if getattr(assignment, "student", None) and assignment.student else "Student")
         )
+        return await self.grade_assignment(assignment, context_dict, question_types)
 
-        # Save or update grading context (get-or-create to avoid UNIQUE on assignment_id on retry)
-        grading_context = (
-            self.db.query(GradingContext)
-            .filter(GradingContext.assignment_id == assignment.id)
-            .first()
+
+    async def run_context_prompt_phase(
+        self,
+        assignment: Assignment,
+        context: GradingContext,
+        template_instruction: str,
+        custom_instruction: str,
+        student_info: str,
+    ) -> Dict[str, Any]:
+        """
+        Run the grading context prompt; parse JSON output and optionally search for books/articles.
+        Saves extracted_references and final_grading_instruction (into ai_understanding) to context.
+        Returns dict with keys: extracted_references, final_grading_instruction.
+        """
+        background = (context.background or "").strip()
+        prompt = GRADING_CONTEXT_PROMPT.format(
+            student_info=student_info or "Not provided.",
+            background=background or "Not provided.",
+            template_instruction=template_instruction or "None.",
+            custom_instruction=custom_instruction or "None.",
         )
-        if grading_context:
-            grading_context.raw_background = assignment.background
-            grading_context.extracted_references = context.get("references")
-            grading_context.search_results = None
-            grading_context.cached_article_ids = context.get("cached_article_ids")
-            grading_context.ai_understanding = json.dumps(context.get("understanding"))
-        else:
-            grading_context = GradingContext(
-                assignment_id=assignment.id,
-                raw_background=assignment.background,
-                extracted_references=context.get("references"),
-                search_results=None,
-                cached_article_ids=context.get("cached_article_ids"),
-                ai_understanding=json.dumps(context.get("understanding")),
-            )
-            self.db.add(grading_context)
+        response = await self._call_ai(
+            prompt=prompt,
+            system_prompt="You are an expert English teacher. Output only valid JSON.",
+        )
+        if not response:
+            raise ValueError("Context prompt returned empty response")
+        text = response.strip()
+        if text.startswith("```"):
+            first = text.find("\n")
+            if first != -1:
+                text = text[first + 1 :]
+            if text.endswith("```"):
+                text = text[:-3].strip()
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as e:
+            logger.warning("Context prompt JSON parse failed, using raw as instruction: %s", e)
+            data = {
+                "extracted_references": {"books": [], "articles": [], "authors": []},
+                "final_grading_instruction": text[:8000],
+            }
+        refs = data.get("extracted_references") or {}
+        if not isinstance(refs, dict):
+            refs = {"books": [], "articles": [], "authors": []}
+        final_instruction = (data.get("final_grading_instruction") or "").strip() or "Grade the assignment fairly with constructive feedback."
+        search_service = get_search_service(self.db)
+        books = refs.get("books") or []
+        cached_article_ids = []
+        for book in books[:10]:
+            article_data = search_service.fetch_article_content(book)
+            if article_data and "cached_article_id" in article_data:
+                cached_article_ids.append(article_data["cached_article_id"])
+        context.extracted_references = refs
+        context.cached_article_ids = cached_article_ids if cached_article_ids else None
+        context.ai_understanding = final_instruction
         self.db.commit()
+        return {"extracted_references": refs, "final_grading_instruction": final_instruction}
 
-        # Stage 2: Grade
-        result = await self.grade_assignment(assignment, context, question_types)
-
-        return result
+    async def run_grading_prompt_phase(
+        self,
+        assignment: Assignment,
+        context: GradingContext,
+        student_name: str,
+    ) -> str:
+        """
+        Run the grading prompt using context.ai_understanding as final instruction and assignment.extracted_text.
+        Returns HTML grading result.
+        """
+        final_instruction = (context.ai_understanding or "").strip() or "Grade the assignment with constructive feedback. Output HTML with <del> for errors and <span class=\"correction\"> for corrections."
+        homework = (assignment.extracted_text or "").strip() or "(No content)"
+        student_name_display = (student_name or "").strip()
+        if student_name_display:
+            salutation_rule = "In the Teacher's Comments section, address the student with 'Dear " + student_name_display + ",' (use this exact salutation)."
+        else:
+            salutation_rule = "In the Teacher's Comments section, use 'Dear,' only (no name after it). Do not use 'Dear Student' or any other default name."
+        prompt = GRADING_PROMPT.format(
+            student_name=student_name_display or "(no name provided)",
+            student_salutation_rule=salutation_rule,
+            final_grading_instruction=final_instruction,
+            student_homework=homework,
+        )
+        response = await self._call_ai(
+            prompt=prompt,
+            system_prompt="You are an expert English teacher. Output only the required HTML fragment.",
+        )
+        if not response:
+            raise ValueError("Grading prompt returned empty response")
+        html = response.strip()
+        if html.startswith("```"):
+            first = html.find("\n")
+            if first != -1:
+                html = html[first + 1 :]
+            if html.endswith("```"):
+                html = html[:-3].strip()
+        return html
 
 
 def get_ai_grading_service(db: Session) -> AIGradingService:

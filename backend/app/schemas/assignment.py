@@ -24,11 +24,11 @@ class QuestionType(str, Enum):
 class AssignmentStatusEnum(str, Enum):
     """Assignment status enumeration."""
 
+    UPLOADING = "uploading"
     UPLOADED = "uploaded"
-    PROCESSING = "processing"
-    GRADING = "grading"
-    COMPLETED = "completed"
-    FAILED = "failed"
+    EXTRACTED = "extracted"
+    UPLOAD_FAILED = "upload_failed"
+    EXTRACT_FAILED = "extract_failed"
 
 
 class SourceFormatEnum(str, Enum):
@@ -54,10 +54,10 @@ class AssignmentUploadResponse(BaseModel):
     """Response after uploading an assignment."""
 
     id: int
-    title: Optional[str] = None
+    student_name: Optional[str] = None
     filename: str
     source_format: SourceFormatEnum
-    upload_time: datetime
+    upload_time: str
     status: AssignmentStatusEnum
 
     class Config:
@@ -130,31 +130,57 @@ class BatchGradeRequest(BaseModel):
     template_id: Optional[int] = None
 
 
-class GradedAssignment(BaseModel):
-    """Response with graded assignment details."""
+class AIGradingStatusEnum(str, Enum):
+    """AI grading run status."""
 
-    id: int
+    NOT_STARTED = "not_started"
+    GRADING = "grading"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class GradedAssignment(BaseModel):
+    """Response after a grading run (ai_grading record)."""
+
+    id: int  # ai_grading.id
     assignment_id: int
-    status: AssignmentStatusEnum
+    status: AIGradingStatusEnum
     results: Optional[GradingResult] = None
-    graded_at: Optional[datetime] = None
+    graded_at: Optional[str] = None
 
     class Config:
         from_attributes = True
 
 
+class GradePhaseResponse(BaseModel):
+    """Response for each phase of the grading flow."""
+
+    phase: str  # "upload", "analyze_context", "grading"
+    assignment_id: Optional[int] = None
+    context_id: Optional[int] = None
+    ai_grading_id: Optional[int] = None
+    status: Optional[str] = None
+    elapsed_ms: Optional[int] = None
+    error: Optional[str] = None
+
+
 class AssignmentListItem(BaseModel):
-    """Assignment item for list view."""
+    """Assignment item for list view (assignment + latest grading info if any)."""
 
     id: int
-    title: Optional[str] = None
+    title: str  # From grading_context.title or "Assignment"
+    student_name: Optional[str] = None
+    template_display: str  # Template name, "Custom Instruction", or "name + Custom"
+    display_status: str  # "Ready for grading", "Uploaded", "Completed", etc.
+    display_date: str  # YYYY/MM/DD from assignment.updated_at or ai_grading.updated_at
     filename: str
     source_format: SourceFormatEnum
     status: AssignmentStatusEnum
-    upload_time: datetime
-    graded_at: Optional[datetime] = None
-    essay_topic: Optional[str] = None  # First line of homework (extracted_text)
-    grading_model: Optional[str] = None  # AI model used e.g. GLM-4.7
+    upload_time: str
+    graded_at: Optional[str] = None
+    essay_topic: Optional[str] = None
+    grading_model: Optional[str] = None
+    latest_grading_status: Optional[AIGradingStatusEnum] = None
 
     class Config:
         from_attributes = True
@@ -167,23 +193,32 @@ class AssignmentListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+    status_options: List[str] = []  # Distinct display_status values for filter dropdown
 
 
 class AssignmentDetail(BaseModel):
-    """Detailed assignment information."""
+    """Detailed assignment + latest grading run (context + result)."""
 
     id: int
-    title: Optional[str] = None
+    student_name: Optional[str] = None
     filename: str
     source_format: SourceFormatEnum
     status: AssignmentStatusEnum
-    upload_time: datetime
-    graded_at: Optional[datetime] = None
+    upload_time: str
+    updated_at: Optional[str] = None  # from assignments.updated_at
+    extracted_text: Optional[str] = None
+    # From latest grading_context + ai_grading
+    title: Optional[str] = None  # from grading_contexts.title, falls back to "Assignment"
+    template_name: Optional[str] = None  # from grading_templates.name
+    ai_grading_status: Optional[str] = None  # from ai_grading.status
+    graded_at: Optional[str] = None
     background: Optional[str] = None
     instructions: Optional[str] = None
-    extracted_text: Optional[str] = None
+    grading_time: Optional[int] = None  # duration in seconds from ai_grading.grading_time
+    essay_topic: Optional[str] = None  # fallback/legacy
     grading_results: Optional[GradingResult] = None
-    graded_content: Optional[str] = None  # HTML grading output (from grading_results.html_content)
+    graded_content: Optional[str] = None
+    grading_model: Optional[str] = None
 
     class Config:
         from_attributes = True

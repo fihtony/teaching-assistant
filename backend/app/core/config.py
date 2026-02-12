@@ -136,7 +136,7 @@ def get_storage_path(storage_type: str) -> Path:
 
 def get_database_path() -> Path:
     """Get the absolute path to the database file.
-    Used by: app.core.database (engine), app.core.migration.
+    Used by: app.core.database (engine).
     Default value: config.yaml 'database.path' or DatabaseConfig.path in config.py ('data/teaching.db').
     """
     config = get_config()

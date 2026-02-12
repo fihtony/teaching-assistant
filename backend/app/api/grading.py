@@ -15,7 +15,7 @@ from app.core.logging import get_logger
 from app.core.security import encrypt_api_key, get_current_teacher_id
 from app.core.datetime_utils import from_iso_datetime, get_now_with_timezone
 from app.core.settings_db import ensure_settings_config
-from app.models import GradingHistory, GradingTemplate, DEFAULT_TEACHER_ID
+from app.models import GradingTemplate, DEFAULT_TEACHER_ID
 from app.schemas.grading import (
     GradeEssayRequest,
     GradingResultResponse,
@@ -27,9 +27,21 @@ from app.schemas.grading import (
     AIProviderConfigResponse,
     AIProviderInfo,
 )
+from app.services.ai_providers import list_llm_provider_names
 from app.services.essay_grading import EssayGradingService
 
 logger = get_logger()
+
+# Display names and default models for GET /providers (from LLM provider registry)
+PROVIDER_DISPLAY = {
+    "zhipuai": ("ZhipuAI (智谱AI)", "glm-4-flash"),
+    "zhipu": ("ZhipuAI (智谱AI)", "glm-4-flash"),
+    "openai": ("OpenAI", "gpt-4o"),
+    "anthropic": ("Anthropic", "claude-3-5-sonnet-20241022"),
+    "google": ("Google Gemini", "gemini-1.5-pro"),
+    "gemini": ("Google Gemini", "gemini-1.5-pro"),
+    "copilot": ("Copilot Bridge", ""),
+}
 
 router = APIRouter(prefix="/grading", tags=["grading"])
 
@@ -135,24 +147,8 @@ async def get_grading_history(
     db: Session = Depends(get_db),
     teacher_id: int = DEFAULT_TEACHER_ID,
 ):
-    """Get grading history for the current teacher."""
-    service = EssayGradingService(db)
-    history = service.get_grading_history(teacher_id, limit, offset)
-
-    items = [
-        GradingHistoryItem(
-            id=h.id,
-            student_name=h.student_name,
-            student_level=h.student_level,
-            template_id=h.template_id,
-            created_at=h.created_at,
-        )
-        for h in history
-    ]
-
-    total = len(items)  # In production, use count query
-
-    return GradingHistoryResponse(total=total, items=items)
+    """Grading history is now from ai_grading; use GET /api/v1/assignments/history for assignment history."""
+    return GradingHistoryResponse(total=0, items=[])
 
 
 @router.get("/{grading_id}", response_model=GradingResultResponse)
@@ -160,21 +156,8 @@ async def get_grading_result(
     grading_id: str,
     db: Session = Depends(get_db),
 ):
-    """Get a specific grading result."""
-    result = db.query(GradingHistory).filter(GradingHistory.id == grading_id).first()
-
-    if not result:
-        raise HTTPException(status_code=404, detail="Grading result not found")
-
-    return GradingResultResponse(
-        grading_id=result.id,
-        status="completed",
-        html_result=result.html_result,
-        download_url=f"/api/v1/grading/download/{result.id}",
-        student_name=result.student_name,
-        student_level=result.student_level,
-        created_at=result.created_at,
-    )
+    """Legacy: grading results are now under assignments; use GET /api/v1/assignments/{id} for assignment detail."""
+    raise HTTPException(status_code=404, detail="Use GET /api/v1/assignments/{assignment_id} for grading result")
 
 
 @router.get("/download/{grading_id}")
@@ -182,48 +165,23 @@ async def download_grading(
     grading_id: str,
     db: Session = Depends(get_db),
 ):
-    """Download the HTML grading report."""
-    result = db.query(GradingHistory).filter(GradingHistory.id == grading_id).first()
-
-    if not result:
-        raise HTTPException(status_code=404, detail="Grading result not found")
-
-    # Generate HTML file under project root data/graded
-    output_dir = get_storage_path("graded")
-    filename = f"{result.student_name.replace(' ', '_')}_{result.id}.html"
-    file_path = output_dir / filename
-
-    # Create file if it doesn't exist
-    if not file_path.exists():
-        output_dir.mkdir(parents=True, exist_ok=True)
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(result.html_result)
-
-    return FileResponse(
-        file_path,
-        filename=filename,
-        media_type="text/html",
-    )
+    """Legacy: use GET /api/v1/assignments/{id}/export to export graded assignment."""
+    raise HTTPException(status_code=404, detail="Use GET /api/v1/assignments/{assignment_id}/export to download")
 
 
 @router.get("/providers", response_model=list[AIProviderInfo])
 async def list_ai_providers():
-    """List available AI providers."""
-    providers = [
+    """List available AI providers (from LLM provider registry)."""
+    names = list_llm_provider_names()
+    return [
         AIProviderInfo(
-            name="zhipuai",
-            display_name="ZhipuAI (智谱AI)",
-            default_model="glm-4.7",
-            description="Chinese AI provider with GLM models"
-        ),
-        AIProviderInfo(
-            name="gemini",
-            display_name="Google Gemini",
-            default_model="gemini-1.5-pro",
-            description="Google's Gemini AI models"
-        ),
+            name=name,
+            display_name=PROVIDER_DISPLAY.get(name, (name.title(), ""))[0],
+            default_model=PROVIDER_DISPLAY.get(name, ("", ""))[1],
+            description="",
+        )
+        for name in names
     ]
-    return providers
 
 
 @router.post("/providers/config", response_model=AIProviderConfigResponse)

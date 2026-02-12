@@ -14,14 +14,12 @@ from types import SimpleNamespace
 
 from app.core.config import get_storage_path
 from app.core.logging import get_logger
-from app.core.security import decrypt_api_key
-from app.core.settings_db import ensure_settings_config
 from app.models import (
-    GradingHistory,
     GradingTemplate,
     DEFAULT_TEACHER_ID,
 )
-from app.services.ai_providers.factory import get_provider
+from app.services.ai_providers import get_llm_provider
+from app.services.essay_prompts import build_essay_prompt
 from app.services.file_handler import read_essay
 from app.services.html_generator import HTMLGenerator, parse_ai_response
 from app.services.template_loader import TemplateLoader
@@ -62,54 +60,34 @@ class EssayGradingService:
         file_path: Optional[str] = None,
         template_id: str = "persuasive_essay_grade4.html",
         additional_instructions: Optional[str] = None,
-    ) -> GradingHistory:
+    ):
         """
         Grade a student essay.
-
-        Args:
-            teacher_id: Teacher ID
-            student_name: Student name
-            student_level: Student grade level
-            recent_activity: Recent activity context
-            essay_text: Essay text (if pasting)
-            file_path: Path to uploaded file (if uploading)
-            template_id: Template ID to use
-            additional_instructions: Additional grading instructions
-
-        Returns:
-            GradingHistory record with HTML result
+        Returns a result object (id, html_result, student_name, student_level, created_at).
+        Result is not persisted; use assignment grading + ai_grading for persistent history.
         """
-        # 1. Get AI provider config for teacher
-        ai_config = self._get_ai_config(teacher_id)
-
-        # 2. Get template content
+        # 1. Get template content
         requirements = self._get_requirements(template_id, additional_instructions)
 
-        # 3. Read essay (from text or file)
+        # 2. Read essay (from text or file)
         essay = essay_text or read_essay(file_path or "")
 
         if not essay:
             raise ValueError("No essay content provided")
 
-        # 4. Get provider and grade
-        provider = get_provider(
-            ai_config.provider,
-            decrypt_api_key(ai_config.api_key_encrypted),
-            ai_config.model,
-        )
-
-        logger.info(f"Grading essay for {student_name} using {ai_config.provider}")
-
-        # 5. Call AI with context
-        result = await provider.grade_essay(
+        # 3. Build prompt and call generic LLM provider (same config as other AI flows)
+        prompt = build_essay_prompt(
             essay=essay,
             requirements=requirements,
             student_name=student_name,
             student_level=student_level,
             recent_activity=recent_activity,
         )
+        llm = get_llm_provider(self.db)
+        logger.info("Grading essay for %s using configured AI provider", student_name)
+        result = await llm.complete(prompt)
 
-        # 6. Parse and generate HTML
+        # 4. Parse and generate HTML
         essay_html, corrections_html, comments_html = parse_ai_response(result)
 
         # 7. Generate complete HTML file
@@ -127,39 +105,17 @@ class EssayGradingService:
             html_result = f.read()
 
         # 9. Save to database
-        grading_record = GradingHistory(
-            teacher_id=teacher_id,
+        # Result not persisted (grading_history removed). Return in-memory result.
+        import uuid
+        grading_record = SimpleNamespace(
+            id=str(uuid.uuid4()),
+            html_result=html_result,
             student_name=student_name,
             student_level=student_level,
-            recent_activity=recent_activity,
-            template_id=template_id,
-            additional_instructions=additional_instructions,
-            essay_text=essay,
-            html_result=html_result,
-            file_path=file_path,
+            created_at=datetime.utcnow(),
         )
-        self.db.add(grading_record)
-        self.db.commit()
-        self.db.refresh(grading_record)
-
-        logger.info(f"Grading completed: {grading_record.id}")
+        logger.info(f"Essay grading completed: {grading_record.id}")
         return grading_record
-
-    def _get_ai_config(self, teacher_id: int) -> SimpleNamespace:
-        """
-        Get AI config from Settings (type=ai-config). Used for essay grading.
-
-        Returns:
-            Object with .provider, .api_key_encrypted, .model
-        """
-        rec = ensure_settings_config(self.db)
-        cfg = rec.config or {}
-        api_key = cfg.get("api_key") or ""
-        return SimpleNamespace(
-            provider=cfg.get("provider", "openai"),
-            api_key_encrypted=api_key,
-            model=cfg.get("model", "gpt-4o"),
-        )
 
     def _get_requirements(self, template_id: str, additional: Optional[str]) -> str:
         """
@@ -272,44 +228,10 @@ class EssayGradingService:
         filename = f"{safe_name}_{timestamp}_graded.html"
         return str(output_dir / filename)
 
-    def get_grading_history(
-        self,
-        teacher_id: int = DEFAULT_TEACHER_ID,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> list[GradingHistory]:
-        """
-        Get grading history for a teacher.
+    def get_grading_history(self, teacher_id: int = DEFAULT_TEACHER_ID, limit: int = 50, offset: int = 0):
+        """Grading history is now from ai_grading/assignments; returns empty list."""
+        return []
 
-        Args:
-            teacher_id: Teacher ID
-            limit: Maximum number of records
-            offset: Offset for pagination
-
-        Returns:
-            List of GradingHistory records
-        """
-        return (
-            self.db.query(GradingHistory)
-            .filter(GradingHistory.teacher_id == teacher_id)
-            .order_by(GradingHistory.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-            .all()
-        )
-
-    def get_grading_result(self, grading_id: str) -> Optional[GradingHistory]:
-        """
-        Get a specific grading result.
-
-        Args:
-            grading_id: Grading record ID
-
-        Returns:
-            GradingHistory record or None
-        """
-        return (
-            self.db.query(GradingHistory)
-            .filter(GradingHistory.id == grading_id)
-            .first()
-        )
+    def get_grading_result(self, grading_id: str):
+        """Grading results are now under assignments; returns None."""
+        return None

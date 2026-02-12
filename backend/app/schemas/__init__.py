@@ -5,6 +5,7 @@ Schemas package initialization.
 from app.schemas.assignment import (
     QuestionType,
     AssignmentStatusEnum,
+    AIGradingStatusEnum,
     SourceFormatEnum,
     ExportFormat,
     AssignmentUploadResponse,
@@ -15,6 +16,7 @@ from app.schemas.assignment import (
     GradeAssignmentByPathBody,
     BatchGradeRequest,
     GradedAssignment,
+    GradePhaseResponse,
     AssignmentListItem,
     AssignmentListResponse,
     AssignmentDetail,
@@ -48,6 +50,7 @@ __all__ = [
     # Assignment
     "QuestionType",
     "AssignmentStatusEnum",
+    "AIGradingStatusEnum",
     "SourceFormatEnum",
     "ExportFormat",
     "AssignmentUploadResponse",
@@ -58,6 +61,7 @@ __all__ = [
     "GradeAssignmentByPathBody",
     "BatchGradeRequest",
     "GradedAssignment",
+    "GradePhaseResponse",
     "AssignmentListItem",
     "AssignmentListResponse",
     "AssignmentDetail",

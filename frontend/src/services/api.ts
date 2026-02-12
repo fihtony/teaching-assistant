@@ -5,6 +5,7 @@
 import axios, { AxiosInstance } from "axios";
 import type {
   Assignment,
+  AssignmentListResponse,
   Template,
   AIConfig,
   AIConfigUpdate,
@@ -16,6 +17,7 @@ import type {
   PaginatedResponse,
   BatchGradeRequest,
   ExportFormat,
+  GradePhaseResponse,
 } from "@/types";
 
 // Create axios instance
@@ -29,12 +31,11 @@ const api: AxiosInstance = axios.create({
 // Assignments API
 export const assignmentsApi = {
   // Upload a single assignment
-  upload: async (data: { file: File; student_name?: string; background_info?: string; template_id?: string }): Promise<Assignment> => {
+  upload: async (data: { file: File; student_id?: number; student_name?: string }): Promise<Assignment> => {
     const formData = new FormData();
     formData.append("file", data.file);
+    if (data.student_id != null) formData.append("student_id", String(data.student_id));
     if (data.student_name) formData.append("student_name", data.student_name);
-    if (data.background_info) formData.append("background_info", data.background_info);
-    if (data.template_id) formData.append("template_id", data.template_id);
     const response = await api.post("/assignments/upload", formData, {
       headers: { "Content-Type": "multipart/form-data" },
     });
@@ -59,17 +60,29 @@ export const assignmentsApi = {
     return response.data;
   },
 
-  // List assignments
-  list: async (params: { page?: number; limit?: number; search?: string; status?: string }): Promise<PaginatedResponse<Assignment>> => {
-    const response = await api.get("/assignments", { params });
+  // List assignments (history: title, student, template, display_status, display_date; sort, search, status filter)
+  list: async (params: {
+    page?: number;
+    limit?: number;
+    page_size?: number;
+    search?: string;
+    status?: string;
+    sort_by?: "date" | "student_name" | "title";
+    sort_order?: "asc" | "desc";
+  }): Promise<AssignmentListResponse> => {
+    const { limit, page_size, ...rest } = params;
+    const response = await api.get("/assignments", { params: { ...rest, page_size: page_size ?? limit ?? 10 } });
+    return response.data;
+  },
+
+  // Delete assignment
+  delete: async (id: string): Promise<{ message: string }> => {
+    const response = await api.delete(`/assignments/${id}`);
     return response.data;
   },
 
   // Grade an assignment (optional body: background, template_id for grading)
-  grade: async (
-    id: string,
-    body?: { background?: string; template_id?: number },
-  ): Promise<Assignment> => {
+  grade: async (id: string, body?: { background?: string; template_id?: number }): Promise<Assignment> => {
     const response = await api.post(`/assignments/${id}/grade`, body ?? {});
     return response.data;
   },
@@ -99,6 +112,51 @@ export const assignmentsApi = {
   // Delete assignment
   delete: async (id: string): Promise<void> => {
     await api.delete(`/assignments/${id}`);
+  },
+
+  // 3-phase grading flow (optional signal for cancel)
+  gradeUploadPhase: async (
+    form: {
+      file: File;
+      student_id?: number;
+      student_name?: string;
+      background?: string;
+      template_id?: number;
+      instructions?: string;
+    },
+    signal?: AbortSignal,
+  ): Promise<GradePhaseResponse> => {
+    const formData = new FormData();
+    formData.append("file", form.file);
+    if (form.student_id != null) formData.append("student_id", String(form.student_id));
+    if (form.student_name) formData.append("student_name", form.student_name);
+    if (form.background) formData.append("background", form.background);
+    if (form.template_id != null) formData.append("template_id", String(form.template_id));
+    if (form.instructions) formData.append("instructions", form.instructions);
+    const response = await api.post("/assignments/grade/upload", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+      signal,
+    });
+    return response.data;
+  },
+  analyzeContextPhase: async (assignmentId: number, signal?: AbortSignal): Promise<GradePhaseResponse> => {
+    const response = await api.post(`/assignments/${assignmentId}/grade/analyze-context`, undefined, { signal });
+    return response.data;
+  },
+  runGradingPhase: async (assignmentId: number, signal?: AbortSignal): Promise<GradePhaseResponse> => {
+    const response = await api.post(`/assignments/${assignmentId}/grade/run`, undefined, { signal });
+    return response.data;
+  },
+
+  // Get dashboard statistics
+  getStats: async (): Promise<{
+    total_graded: number;
+    pending: number;
+    this_week: number;
+    needs_review: number;
+  }> => {
+    const response = await api.get("/assignments/stats/dashboard");
+    return response.data;
   },
 };
 
@@ -181,7 +239,7 @@ export const settingsApi = {
   getModels: async (
     provider: string,
     baseUrl?: string,
-    apiKey?: string
+    apiKey?: string,
   ): Promise<{
     models: (string | { name: string; vendor: string; id: string })[];
     error?: string;

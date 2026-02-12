@@ -41,3 +41,11 @@ def from_iso_datetime(dt_str: Optional[str]) -> Optional[datetime]:
         return None
 
     return datetime.fromisoformat(dt_str)
+
+
+def parse_iso_datetime_to_date_str(dt_str: Optional[str]) -> Optional[str]:
+    """Parse ISO datetime string and return date as YYYY/MM/DD."""
+    dt = from_iso_datetime(dt_str)
+    if dt is None:
+        return None
+    return dt.strftime("%Y/%m/%d")

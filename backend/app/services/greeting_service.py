@@ -11,13 +11,12 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.core.settings_db import ensure_greeting_config
-from app.core.security import decrypt_api_key
 from app.models import (
     CachedArticle,
     GradingContext,
     GreetingHistory,
-    Settings,
 )
+from app.services import get_ai_grading_service
 
 logger = get_logger()
 
@@ -42,15 +41,6 @@ class GreetingService:
 
     def __init__(self, db: Session):
         self.db = db
-        self._litellm = None
-
-    def _get_litellm(self):
-        """Lazy load litellm module."""
-        if self._litellm is None:
-            import litellm
-
-            self._litellm = litellm
-        return self._litellm
 
     def _get_recent_articles(self) -> List[CachedArticle]:
         """
@@ -166,27 +156,8 @@ class GreetingService:
             Generated greeting.
         """
         try:
-            ai_config = (
-                self.db.query(Settings).filter(Settings.type == "ai-config").first()
-            )
-
-            if not ai_config or not ai_config.config:
-                # Fallback to template-based greeting
-                return self._template_greeting(quote, article)
-
-            config_data = ai_config.config or {}
-            if not config_data.get("api_key"):
-                return self._template_greeting(quote, article)
-
-            litellm = self._get_litellm()
-            api_key = (
-                decrypt_api_key(config_data["api_key"])
-                if config_data.get("api_key")
-                else None
-            )
-            if api_key:
-                litellm.openai_key = api_key
-
+            # Use same AI config and call path as grading (user-defined provider/model)
+            grading_service = get_ai_grading_service(self.db)
             prompt = f"""
 Create a brief, warm greeting for a teacher starting their day grading assignments.
 Incorporate this quote from "{article.title}" by {article.author or 'Unknown'}:
@@ -201,14 +172,10 @@ The greeting should:
 
 Just provide the greeting, nothing else.
 """
-
-            response = await litellm.acompletion(
-                model=config_data.get("model") or "gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                timeout=30,
-            )
-
-            return response.choices[0].message.content.strip()
+            greeting_text = await grading_service._call_ai(prompt)
+            if greeting_text:
+                return greeting_text.strip()
+            return self._template_greeting(quote, article)
 
         except Exception as e:
             logger.error(f"AI greeting generation error: {str(e)}")

@@ -24,7 +24,7 @@ import json
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.core.database import get_session_local, init_db
-from app.models import Assignment, Teacher, AssignmentStatus, SourceFormat, Settings
+from app.models import Assignment, Teacher, AssignmentStatus, SourceFormat, Settings, GradingContext
 from app.services.ocr_service import OCRService
 from app.services.ai_grading import AIGradingService
 from app.services.pdf_annotation_service import PDFAnnotationService
@@ -64,50 +64,18 @@ async def create_test_assignment(
         db_session.add(teacher)
         db_session.commit()
 
-    # Create assignment with student info
     assignment = Assignment(
         teacher_id=teacher.id,
-        title=f"Vocabulary Homework - {student_name}",
+        student_name=student_name,
         original_filename="1_vocabulary.pdf",
         stored_filename=f"homework_{student_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
         source_format=SourceFormat.PDF,
-        status=AssignmentStatus.UPLOADED,
+        status=AssignmentStatus.EXTRACTED,
         extracted_text=extracted_text,
-        background=f"""
-This is a vocabulary worksheet focusing on synonyms. 
-The worksheet has multiple sections:
-1. Section A: Cross out the word that doesn't belong in each word group
-2. Section B: Write vocabulary words to complete sentences (using words like: vast, unfurl, garment, trophy, chide, thaw, din, nimble, fret, eerie)
-3. Section B (Reading): Multiple choice questions about vocabulary words
-4. Writing section: Design a new item of clothing using vocabulary words
-5. Maze section: Match synonyms to navigate through a maze
-
-Key vocabulary words: unfurl, vex, din, chide, nimble, thaw, garment, trophy, vast, eerie, fret
-
-The student is named {student_name}.
-Based on the extracted text provided, please analyze and grade the homework.
-""",
-        instructions="""
-Please grade this vocabulary homework following these guidelines:
-1. Check if the student correctly identified words that don't belong
-2. Verify sentence completion uses appropriate vocabulary words
-3. Grade multiple choice questions
-4. Evaluate the creative writing section for vocabulary usage
-5. Check the synonym maze answers
-
-For each question/section, provide:
-- Mark as correct (✓) or incorrect (✗)
-- Brief feedback or correction (1 sentence max for incorrect answers)
-- Encouragement for correct answers
-
-Be encouraging and provide positive feedback. Use phrases like "Great job!" or "Excellent!" for correct answers.
-For any mistakes, provide gentle corrections suggesting the right answer.
-""",
     )
     db_session.add(assignment)
     db_session.commit()
     db_session.refresh(assignment)
-
     return assignment
 
 
@@ -126,23 +94,62 @@ def has_valid_ai_config(db_session) -> bool:
 
 
 async def grade_assignment(db_session, assignment: Assignment) -> GradingResult:
-    """Grade the assignment using real AI service based on extracted content."""
+    """Grade the assignment using real AI service; create context with background/instructions."""
 
     print("Calling AI grading service with extracted content...")
     grading_service = AIGradingService(db_session)
 
-    # Use question types that match the homework structure
+    background = """
+This is a vocabulary worksheet focusing on synonyms.
+The worksheet has multiple sections:
+1. Section A: Cross out the word that doesn't belong in each word group
+2. Section B: Write vocabulary words to complete sentences (using words like: vast, unfurl, garment, trophy, chide, thaw, din, nimble, fret, eerie)
+3. Section B (Reading): Multiple choice questions about vocabulary words
+4. Writing section: Design a new item of clothing using vocabulary words
+5. Maze section: Match synonyms to navigate through a maze
+
+Key vocabulary words: unfurl, vex, din, chide, nimble, thaw, garment, trophy, vast, eerie, fret
+
+The student is named """ + (assignment.student_name or "Student") + """.
+Based on the extracted text provided, please analyze and grade the homework.
+"""
+    instructions = """
+Please grade this vocabulary homework following these guidelines:
+1. Check if the student correctly identified words that don't belong
+2. Verify sentence completion uses appropriate vocabulary words
+3. Grade multiple choice questions
+4. Evaluate the creative writing section for vocabulary usage
+5. Check the synonym maze answers
+
+For each question/section, provide:
+- Mark as correct (✓) or incorrect (✗)
+- Brief feedback or correction (1 sentence max for incorrect answers)
+- Encouragement for correct answers
+
+Be encouraging and provide positive feedback. Use phrases like "Great job!" or "Excellent!" for correct answers.
+For any mistakes, provide gentle corrections suggesting the right answer.
+"""
+    context = GradingContext(
+        assignment_id=assignment.id,
+        title=(assignment.extracted_text or "").strip().split("\n")[0][:200] if assignment.extracted_text else None,
+        background=background,
+        instructions=instructions,
+    )
+    db_session.add(context)
+    db_session.commit()
+    db_session.refresh(context)
+
     question_types = [
-        QuestionType.MCQ,  # Section A: Cross out
-        QuestionType.FILL_BLANK,  # Section B: Fill blanks
-        QuestionType.MCQ,  # Section B: Multiple choice
-        QuestionType.ESSAY,  # Writing section
-        QuestionType.FILL_BLANK,  # Synonym maze
+        QuestionType.MCQ,
+        QuestionType.FILL_BLANK,
+        QuestionType.MCQ,
+        QuestionType.ESSAY,
+        QuestionType.FILL_BLANK,
     ]
 
-    # Call real AI grading based on extracted content
-    result = await grading_service.grade(assignment, question_types)
-    print(f"✓ AI grading completed successfully")
+    # Call real AI grading with context
+    result = await grading_service.grade_with_context(assignment, context, question_types)
+    print("✓ AI grading completed successfully")
     return result
 
 
@@ -257,7 +264,7 @@ async def main():
             db, extracted_text, student_name, student_id
         )
         print(f"  ✓ Assignment created (ID: {assignment.id})")
-        print(f"  Title: {assignment.title}")
+        print(f"  Student: {assignment.student_name}")
         print(f"  Storage: {assignment.stored_filename}")
 
         # Step 3: Grade the assignment using AI
@@ -288,9 +295,7 @@ async def main():
         else:
             print("\n[Step 6] Teacher's graded version not available for comparison")
 
-        # Update assignment status
-        assignment.status = AssignmentStatus.COMPLETED
-        assignment.graded_at = datetime.now().isoformat()
+        # Assignment status stays EXTRACTED; grading is stored in ai_grading
         db.commit()
 
         print("\n" + "=" * 70)

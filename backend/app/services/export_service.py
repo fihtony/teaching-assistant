@@ -137,7 +137,7 @@ class ExportService:
         content = []
 
         # Title
-        title = assignment.title or assignment.original_filename
+        title = assignment.student_name or assignment.original_filename
         content.append(Paragraph(f"Graded Assignment: {title}", title_style))
         content.append(Spacer(1, 12))
 
@@ -246,7 +246,7 @@ class ExportService:
         doc = Document()
 
         # Title
-        title = assignment.title or assignment.original_filename
+        title = assignment.student_name or assignment.original_filename
         doc.add_heading(f"Graded Assignment: {title}", 0)
 
         # Metadata
@@ -410,7 +410,7 @@ h2, h3 {{ font-weight: bold; margin-top: 1em; }}
         # When result is HTML-only (no structured items), convert to requested format
         if grading_result.html_content and not grading_result.items:
             base_name = Path(assignment.stored_filename).stem
-            title = assignment.title or assignment.original_filename
+            title = assignment.student_name or assignment.original_filename
             actual_format = self.determine_export_format(
                 assignment.source_format,
                 export_format,
@@ -440,7 +440,7 @@ h2, h3 {{ font-weight: bold; margin-top: 1em; }}
             content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
         # Update assignment with graded filename
-        assignment.graded_filename = filename
+        # graded_filename is stored on ai_grading record in API
 
         return content, filename, content_type
 

@@ -8,7 +8,7 @@ from app.models.template import GradingTemplate
 from app.models.settings import Settings
 from app.models.cached_article import CachedArticle
 from app.models.grading_context import GradingContext, GreetingHistory
-from app.models.grading_history import GradingHistory
+from app.models.ai_grading import AIGrading, AIGradingStatus
 from app.models.group import Group
 from app.models.student import Student, Gender
 
@@ -23,7 +23,8 @@ __all__ = [
     "CachedArticle",
     "GradingContext",
     "GreetingHistory",
-    "GradingHistory",
+    "AIGrading",
+    "AIGradingStatus",
     "Group",
     "Student",
     "Gender",
