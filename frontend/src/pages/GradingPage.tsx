@@ -3,8 +3,8 @@
  */
 
 import { useCallback, useState, useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useSearchParams, useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import type { FileRejection } from "react-dropzone";
 import * as gradingApi from "@/services/gradingApi";
 import { templatesApi, studentsApi } from "@/services/api";
@@ -15,6 +15,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { FileUpload } from "@/components/common/FileUpload";
+import { GradingProgressDialog } from "@/components/common/GradingProgressDialog";
+import { useGradingProgress } from "@/hooks/useGradingProgress";
 import { FileText, Sparkles, Loader2 } from "lucide-react";
 
 const CONTENT_ACCEPT = {
@@ -24,9 +26,22 @@ const CONTENT_ACCEPT = {
 };
 
 export function GradingPage() {
+  const navigate = useNavigate();
   const { show: showNotification } = useNotification();
   const [searchParams] = useSearchParams();
   const resultId = searchParams.get("result");
+
+  const {
+    progressOpen,
+    progressStep,
+    progressError,
+    phaseElapsedMs,
+    totalElapsedMs,
+    phaseTimes,
+    startGradingProcess,
+    handleCancelGrading,
+    closeProgress,
+  } = useGradingProgress();
 
   const handleUnsupportedFiles = useCallback(
     (rejected: FileRejection[], acceptedFormatsLabel: string) => {
@@ -47,7 +62,6 @@ export function GradingPage() {
   const [files, setFiles] = useState<File[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string>("");
   const [additionalInstructions, setAdditionalInstructions] = useState("");
-  const [isGrading, setIsGrading] = useState(false);
 
   // Fetch templates
   const { data: templates } = useQuery({
@@ -76,44 +90,6 @@ export function GradingPage() {
     }
   }, [historyResult]);
 
-  const uploadMutation = useMutation({
-    mutationFn: async () => {
-      const finalStudentName = useCustomStudentName ? customStudentName : studentName;
-      if (files.length > 0) {
-        const fileResult = await gradingApi.uploadEssayFile(files[0]);
-        return gradingApi.gradeEssay({
-          student_name: finalStudentName || undefined,
-          recent_activity: background || undefined,
-          file_id: fileResult.file_id,
-          template_id: selectedTemplate || undefined,
-          additional_instructions: additionalInstructions || undefined,
-        });
-      } else {
-        return gradingApi.gradeEssay({
-          student_name: finalStudentName || undefined,
-          recent_activity: background || undefined,
-          essay_text: contentText || undefined,
-          template_id: selectedTemplate || undefined,
-          additional_instructions: additionalInstructions || undefined,
-        });
-      }
-    },
-    onSuccess: () => {
-      setIsGrading(false);
-      showNotification({
-        type: "success",
-        message: "Grading completed successfully!",
-      });
-    },
-    onError: (error) => {
-      setIsGrading(false);
-      showNotification({
-        type: "error",
-        message: error instanceof Error ? error.message : "Grading failed",
-      });
-    },
-  });
-
   const handleFilesSelected = (newFiles: File[]) => {
     setFiles(newFiles.slice(0, 1)); // Only allow one file
   };
@@ -130,8 +106,35 @@ export function GradingPage() {
       });
       return;
     }
-    setIsGrading(true);
-    await uploadMutation.mutateAsync();
+
+    const finalStudentName = useCustomStudentName ? customStudentName : studentName;
+    // Find student ID if student name is selected from list
+    let studentId: number | undefined;
+    if (!useCustomStudentName && studentName) {
+      const selectedStudent = students.find((s) => s.name === studentName);
+      if (selectedStudent) {
+        studentId = selectedStudent.id;
+      }
+    }
+
+    const assignmentId = await startGradingProcess({
+      file: files.length > 0 ? files[0] : undefined,
+      studentId,
+      studentName: finalStudentName || undefined,
+      background: background || undefined,
+      templateId: selectedTemplate || undefined,
+      contentText: contentText || undefined,
+    });
+
+    if (assignmentId) {
+      // Auto-redirect to result page
+      navigate(`/grade/${assignmentId}`);
+    } else if (progressError) {
+      showNotification({
+        type: "error",
+        message: progressError,
+      });
+    }
   };
 
   if (isLoadingHistory) {
@@ -153,8 +156,13 @@ export function GradingPage() {
           <h1 className="text-3xl font-bold text-gray-900">Assignment Grading</h1>
           <p className="mt-1 text-sm text-gray-500">AI-powered assessment with detailed feedback</p>
         </div>
-        <Button onClick={handleStartGrading} disabled={isGrading || (!contentText && files.length === 0)} size="lg" className="h-12 px-8">
-          {isGrading ? (
+        <Button
+          onClick={handleStartGrading}
+          disabled={progressOpen || (!contentText && files.length === 0)}
+          size="lg"
+          className="h-12 px-8"
+        >
+          {progressOpen ? (
             <>
               <Loader2 className="mr-2 h-5 w-5 animate-spin" />
               Grading...
@@ -309,7 +317,7 @@ export function GradingPage() {
               onFilesSelected={handleFilesSelected}
               selectedFiles={files}
               onRemoveFile={handleRemoveFile}
-              disabled={isGrading}
+              disabled={progressOpen}
               accept={CONTENT_ACCEPT}
               acceptedFormatsLabel="TXT, PDF, Word (.DOCX)"
               onUnsupportedFiles={handleUnsupportedFiles}
@@ -323,7 +331,7 @@ export function GradingPage() {
                 onFilesSelected={handleFilesSelected}
                 selectedFiles={[]}
                 onRemoveFile={() => {}}
-                disabled={isGrading}
+                disabled={progressOpen}
                 accept={CONTENT_ACCEPT}
                 acceptedFormatsLabel="TXT, PDF, Word (.DOCX)"
                 onUnsupportedFiles={handleUnsupportedFiles}
@@ -333,14 +341,17 @@ export function GradingPage() {
         </CardContent>
       </Card>
 
-      {/* Grading progress indicator */}
-      {isGrading && (
-        <div className="mt-6 flex flex-col items-center gap-4 rounded-lg border border-primary/20 bg-primary/5 p-6">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="text-center text-gray-700">AI is assessing the submission...</p>
-          <p className="text-center text-sm text-gray-500">This may take a moment</p>
-        </div>
-      )}
+      {/* Grading progress dialog */}
+      <GradingProgressDialog
+        open={progressOpen}
+        step={progressStep}
+        error={progressError}
+        phaseElapsedMs={phaseElapsedMs}
+        totalElapsedMs={totalElapsedMs}
+        phaseTimes={phaseTimes}
+        onCancel={handleCancelGrading}
+        onClose={closeProgress}
+      />
     </div>
   );
 }

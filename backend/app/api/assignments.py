@@ -15,7 +15,7 @@ from sqlalchemy import desc
 from app.core.ai_config import get_ai_provider_and_model, normalize_grading_model_display
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.core.datetime_utils import get_now_with_timezone, parse_iso_datetime_to_date_str
+from app.core.datetime_utils import get_now_with_timezone, parse_iso_datetime_to_date_str, from_iso_datetime
 from app.models import (
     Assignment,
     AssignmentStatus,
@@ -32,10 +32,6 @@ from app.schemas import (
     AssignmentListResponse,
     AssignmentListItem,
     AssignmentDetail,
-    GradeAssignmentRequest,
-    GradeAssignmentByPathBody,
-    BatchGradeRequest,
-    GradedAssignment,
     GradePhaseResponse,
     GradingResult,
     ExportFormat,
@@ -379,128 +375,6 @@ async def grade_run_phase(
         return GradePhaseResponse(phase="grading", error=str(e), elapsed_ms=elapsed)
 
 
-@router.post("/grade", response_model=GradedAssignment)
-async def grade_assignment(
-    request: GradeAssignmentRequest,
-    db: Session = Depends(get_db),
-):
-    """
-    Grade an uploaded assignment. Creates a grading context and ai_grading record.
-    """
-    assignment = db.query(Assignment).filter(Assignment.id == request.assignment_id).first()
-    if not assignment:
-        raise HTTPException(status_code=404, detail="Assignment not found")
-
-    teacher = ensure_default_teacher(db)
-    instructions = (request.instructions or "").strip()
-    template_id = request.template_id
-    if not instructions and template_id is not None:
-        template = db.query(GradingTemplate).filter(GradingTemplate.id == template_id).first()
-        if template and (template.instructions or "").strip():
-            instructions = template.instructions
-
-    # Essay title from first line of extracted text
-    title = _first_line(assignment.extracted_text)
-    background = (request.background or "").strip()
-
-    # Create grading context for this run
-    context = GradingContext(
-        assignment_id=assignment.id,
-        template_id=template_id,
-        title=title,
-        background=background,
-        instructions=instructions or None,
-    )
-    db.add(context)
-    db.flush()
-
-    # Create ai_grading record (status GRADING)
-    ai_rec = AIGrading(
-        teacher_id=teacher.id,
-        assignment_id=assignment.id,
-        context_id=context.id,
-        status=AIGradingStatus.GRADING,
-    )
-    db.add(ai_rec)
-    db.commit()
-    db.refresh(ai_rec)
-
-    try:
-        import time
-        start = time.perf_counter()
-        grading_service = get_ai_grading_service(db)
-        result = await grading_service.grade_with_context(
-            assignment=assignment,
-            context=context,
-            question_types=request.question_types,
-        )
-        grading_time_seconds = int(round(time.perf_counter() - start))
-
-        result_json = json.dumps(result.model_dump(), ensure_ascii=False)
-        ai_rec.results = result_json
-        ai_rec.status = AIGradingStatus.COMPLETED
-        ai_rec.graded_at = get_now_with_timezone().isoformat()
-        ai_rec.grading_time = grading_time_seconds
-        provider, model = get_ai_provider_and_model(db)
-        ai_rec.grading_model = normalize_grading_model_display(provider, model)
-        db.commit()
-        db.refresh(ai_rec)
-        logger.info(f"Graded assignment: {assignment.id} -> ai_grading {ai_rec.id}")
-
-        return GradedAssignment(
-            id=ai_rec.id,
-            assignment_id=assignment.id,
-            status=AIGradingStatusEnum.COMPLETED,
-            results=result,
-            graded_at=ai_rec.graded_at,
-        )
-    except Exception as e:
-        logger.error(f"Grading failed: {str(e)}")
-        # Calculate total grading time from when ai_rec was created (includes all phases)
-        try:
-            created = from_iso_datetime(ai_rec.created_at)
-            now = get_now_with_timezone()
-            total_grading_time = int((now - created).total_seconds())
-            ai_rec.grading_time = total_grading_time
-        except Exception as te:
-            logger.warning(f"Failed to calculate grading time on failure: {str(te)}")
-        ai_rec.status = AIGradingStatus.FAILED
-        db.commit()
-        raise HTTPException(status_code=500, detail=f"Grading failed: {str(e)}")
-
-
-@router.post("/batch-grade")
-async def batch_grade_assignments(
-    request: BatchGradeRequest,
-    db: Session = Depends(get_db),
-):
-    """
-    Grade multiple assignments with the same instructions.
-    """
-    results = []
-    errors = []
-
-    for assignment_id in request.assignment_ids:
-        try:
-            grade_request = GradeAssignmentRequest(
-                assignment_id=assignment_id,
-                background=request.background,
-                instructions=request.instructions,
-                template_id=request.template_id,
-            )
-            result = await grade_assignment(grade_request, db)
-            results.append(result)
-        except Exception as e:
-            errors.append({"assignment_id": assignment_id, "error": str(e)})
-
-    return {
-        "completed": len(results),
-        "failed": len(errors),
-        "results": results,
-        "errors": errors,
-    }
-
-
 @router.get("", response_model=AssignmentListResponse)
 @router.get("/history", response_model=AssignmentListResponse)
 async def get_assignment_history(
@@ -622,32 +496,6 @@ async def get_assignment_history(
     except Exception as e:
         logger.exception("Error fetching assignment history")
         raise HTTPException(status_code=500, detail=f"Error fetching assignments: {str(e)}")
-
-
-@router.post("/{assignment_id}/grade", response_model=GradedAssignment)
-async def grade_assignment_by_id(
-    assignment_id: str,
-    body: Optional[GradeAssignmentByPathBody] = None,
-    db: Session = Depends(get_db),
-):
-    """Grade an assignment by ID. Body: background, instructions, template_id, question_types."""
-    try:
-        aid = int(assignment_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid assignment ID")
-    assignment = db.query(Assignment).filter(Assignment.id == aid).first()
-    if not assignment:
-        raise HTTPException(status_code=404, detail="Assignment not found")
-    if body is None:
-        body = GradeAssignmentByPathBody()
-    request = GradeAssignmentRequest(
-        assignment_id=aid,
-        background=body.background,
-        instructions=body.instructions,
-        template_id=body.template_id,
-        question_types=body.question_types,
-    )
-    return await grade_assignment(request, db)
 
 
 @router.get("/{assignment_id}", response_model=AssignmentDetail)
@@ -834,6 +682,41 @@ async def get_dashboard_stats(db: Session = Depends(get_db)):
         "this_week": this_week,
         "needs_review": needs_review,
     }
+
+
+@router.patch("/{assignment_id}/grading-time")
+async def update_grading_time(
+    assignment_id: int,
+    body: dict,
+    db: Session = Depends(get_db),
+):
+    """
+    Update the total grading time (from all phases) for an assignment.
+    
+    Expects JSON body with 'total_time_ms' (milliseconds).
+    Converts to seconds and saves to the AIGrading record's grading_time field.
+    """
+    total_time_ms = body.get("total_time_ms")
+    if total_time_ms is None:
+        raise HTTPException(status_code=400, detail="total_time_ms is required")
+    
+    # Get the latest AIGrading record for this assignment
+    ai_rec = (
+        db.query(AIGrading)
+        .filter(AIGrading.assignment_id == assignment_id)
+        .order_by(desc(AIGrading.created_at))
+        .first()
+    )
+    
+    if not ai_rec:
+        raise HTTPException(status_code=404, detail="AI grading record not found")
+    
+    # Convert milliseconds to seconds and save
+    grading_time_seconds = int(round(total_time_ms / 1000))
+    ai_rec.grading_time = grading_time_seconds
+    db.commit()
+    
+    return {"message": "Grading time updated", "grading_time_seconds": grading_time_seconds}
 
 
 @router.delete("/{assignment_id}")

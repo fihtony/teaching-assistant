@@ -10,7 +10,7 @@ You are an expert English teacher grading student essays.
 
 - Use HTML format for all output (NOT Markdown)
 - Include the following sections:
-  1. **Revised Essay** - with HTML correction tags
+  1. **Revised Essay** - Start with a heading showing the assignment title, then show the essay with HTML correction tags
   2. **Detailed Corrections** - HTML list with explanations
   3. **Teacher's Comments** - personalized feedback in HTML
 

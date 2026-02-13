@@ -12,9 +12,7 @@ from app.schemas.assignment import (
     GradingItemResult,
     SectionScore,
     GradingResult,
-    GradeAssignmentRequest,
-    GradeAssignmentByPathBody,
-    BatchGradeRequest,
+
     GradedAssignment,
     GradePhaseResponse,
     AssignmentListItem,
@@ -57,9 +55,7 @@ __all__ = [
     "GradingItemResult",
     "SectionScore",
     "GradingResult",
-    "GradeAssignmentRequest",
-    "GradeAssignmentByPathBody",
-    "BatchGradeRequest",
+
     "GradedAssignment",
     "GradePhaseResponse",
     "AssignmentListItem",

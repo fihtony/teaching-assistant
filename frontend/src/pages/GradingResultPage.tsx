@@ -347,9 +347,7 @@ export function GradingResultPage() {
                 {getGradingOutputIcon(assignment.ai_grading_status).icon}
                 AI Graded Output
               </span>
-              {assignment.grading_model && (
-                <span className="text-xs italic text-gray-500 font-normal">by {assignment.grading_model}</span>
-              )}
+              {assignment.grading_model && <span className="text-xs italic text-gray-500 font-normal">by {assignment.grading_model}</span>}
             </CardTitle>
           </CardHeader>
           <CardContent className="flex-1 min-h-0">

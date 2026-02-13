@@ -14,8 +14,6 @@ import type {
   Group,
   GroupWithStudents,
   Student,
-  PaginatedResponse,
-  BatchGradeRequest,
   ExportFormat,
   GradePhaseResponse,
 } from "@/types";
@@ -82,24 +80,6 @@ export const assignmentsApi = {
   },
 
   // Grade an assignment (optional body: background, template_id for grading)
-  grade: async (id: string, body?: { background?: string; template_id?: number }): Promise<Assignment> => {
-    const response = await api.post(`/assignments/${id}/grade`, body ?? {});
-    return response.data;
-  },
-
-  // Batch grade assignments
-  batchGrade: async (
-    request: BatchGradeRequest,
-  ): Promise<{
-    completed: number;
-    failed: number;
-    results: Assignment[];
-    errors: Array<{ assignment_id: string; error: string }>;
-  }> => {
-    const response = await api.post("/assignments/batch-grade", request);
-    return response.data;
-  },
-
   // Export assignment
   export: async (id: string, format: ExportFormat = "pdf"): Promise<Blob> => {
     const response = await api.get(`/assignments/${id}/export`, {
@@ -157,6 +137,13 @@ export const assignmentsApi = {
   }> => {
     const response = await api.get("/assignments/stats/dashboard");
     return response.data;
+  },
+
+  // Update grading time (total time from all phases)
+  updateGradingTime: async (assignmentId: number, totalTimeMs: number): Promise<void> => {
+    await api.patch(`/assignments/${assignmentId}/grading-time`, {
+      total_time_ms: totalTimeMs,
+    });
   },
 };
 

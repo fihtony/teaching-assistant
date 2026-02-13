@@ -69,6 +69,20 @@ class AIGradingService:
         config = get_resolved_ai_config(self.db)
         timeout = config.get("timeout", 300)
         timeout = max(300, int(timeout)) if timeout is not None else 300
+        
+        # Log debug info about the AI prompt invocation
+        logger.debug(
+            "AI prompt invocation: provider=%s, model=%s, prompt_length=%d, system_prompt_length=%d, timeout=%d",
+            config.get("provider"),
+            config.get("model"),
+            len(prompt),
+            len(system_prompt) if system_prompt else 0,
+            timeout,
+        )
+        logger.debug("Prompt content:\n%s", prompt)
+        if system_prompt:
+            logger.debug("System prompt content:\n%s", system_prompt)
+        
         logger.info("Calling AI: provider=%s, model=%s", config.get("provider"), config.get("model"))
         return await llm.complete(
             prompt,
@@ -405,11 +419,13 @@ Respond with your grading as HTML only. Structure your output with these section
         final_instruction = (context.ai_understanding or "").strip() or "Grade the assignment with constructive feedback. Output HTML with <del> for errors and <span class=\"correction\"> for corrections."
         homework = (assignment.extracted_text or "").strip() or "(No content)"
         student_name_display = (student_name or "").strip()
+        assignment_title = (context.title or "").strip() or "(No title provided)"
         if student_name_display:
             salutation_rule = "In the Teacher's Comments section, address the student with 'Dear " + student_name_display + ",' (use this exact salutation)."
         else:
             salutation_rule = "In the Teacher's Comments section, use 'Dear,' only (no name after it). Do not use 'Dear Student' or any other default name."
         prompt = GRADING_PROMPT.format(
+            assignment_title=assignment_title,
             student_name=student_name_display or "(no name provided)",
             student_salutation_rule=salutation_rule,
             final_grading_instruction=final_instruction,

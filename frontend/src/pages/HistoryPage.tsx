@@ -33,6 +33,7 @@ function formatDisplayDate(value: string | undefined): string {
 export function HistoryPage() {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<SortField | null>(null);
@@ -50,11 +51,11 @@ export function HistoryPage() {
   const actualSortOrder = sortOrder === null ? "desc" : sortOrder;
 
   const { data, isLoading } = useQuery({
-    queryKey: ["assignments", page, search, statusFilter, sortBy, actualSortOrder],
+    queryKey: ["assignments", page, pageSize, search, statusFilter, sortBy, actualSortOrder],
     queryFn: () =>
       assignmentsApi.list({
         page,
-        page_size: 10,
+        page_size: pageSize,
         search: search || undefined,
         status: statusFilter !== "all" ? statusFilter : undefined,
         sort_by: sortBy ?? "date",
@@ -63,7 +64,8 @@ export function HistoryPage() {
   });
 
   const assignments = data?.items || [];
-  const totalPages = data ? Math.ceil((data.total ?? 0) / 10) : 1;
+  const totalRecords = data?.total ?? 0;
+  const totalPages = data ? Math.ceil(totalRecords / pageSize) : 1;
   const statusOptions = data?.status_options || [];
 
   const handleSort = (field: SortField) => {
@@ -232,19 +234,38 @@ export function HistoryPage() {
           )}
 
           {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="mt-4 flex items-center justify-center gap-2">
-              <Button variant="outline" size="icon" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <span className="text-sm text-gray-600">
-                Page {page} of {totalPages}
-              </span>
-              <Button variant="outline" size="icon" disabled={page === totalPages} onClick={() => setPage((p) => p + 1)}>
-                <ChevronRight className="h-4 w-4" />
-              </Button>
+          <div className="mt-6 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-600">Records per page:</span>
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setPage(1); // Reset to first page when changing page size
+                }}
+                className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={30}>30</option>
+                <option value={50}>50</option>
+              </select>
+              <span className="text-sm text-gray-600">Total: {totalRecords} records</span>
             </div>
-          )}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-center gap-2">
+                <Button variant="outline" size="icon" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="text-sm text-gray-600">
+                  Page {page} of {totalPages}
+                </span>
+                <Button variant="outline" size="icon" disabled={page === totalPages} onClick={() => setPage((p) => p + 1)}>
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
+          </div>
         </CardContent>
       </Card>
     </div>

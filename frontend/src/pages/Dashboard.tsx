@@ -2,70 +2,41 @@
  * Dashboard page - main landing page with greeting and upload
  */
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type { FileRejection } from "react-dropzone";
 import { GreetingBanner } from "@/components/common/GreetingBanner";
 import { FileUpload } from "@/components/common/FileUpload";
+import { GradingProgressDialog } from "@/components/common/GradingProgressDialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { assignmentsApi, templatesApi, studentsApi } from "@/services/api";
 import { useNotification } from "@/contexts/NotificationContext";
-import { FileText, Clock, CheckCircle, AlertCircle, Upload, Sparkles } from "lucide-react";
-
-function formatElapsedMs(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  const m = Math.floor(totalSeconds / 60);
-  const s = totalSeconds % 60;
-  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-}
-
-function formatPhaseTime(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  if (totalSeconds < 60) {
-    return `${totalSeconds}s`;
-  }
-  const m = Math.floor(totalSeconds / 60);
-  const s = totalSeconds % 60;
-  return `${m}m ${s}s`;
-}
-
-const DASHBOARD_ACCEPT = {
-  "text/plain": [".txt"],
-  "application/pdf": [".pdf"],
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
-  "application/msword": [".doc"],
-};
-
-type ProgressStep = "uploading" | "extracting" | "preparing" | "grading" | "completed" | null;
-
-const PROGRESS_LABELS: Record<NonNullable<ProgressStep>, string> = {
-  uploading: "Uploading file",
-  extracting: "Analysing context",
-  preparing: "Analysing context",
-  grading: "AI grading",
-  completed: "Prepare report",
-};
+import { useGradingProgress } from "@/hooks/useGradingProgress";
+import { FileText, Upload, Clock, AlertCircle, CheckCircle, Sparkles } from "lucide-react";
 
 export function Dashboard() {
   const navigate = useNavigate();
   const { show: showNotification } = useNotification();
+  const {
+    progressOpen,
+    progressStep,
+    progressError,
+    phaseElapsedMs,
+    totalElapsedMs,
+    phaseTimes,
+    startGradingProcess,
+    handleCancelGrading,
+    closeProgress,
+  } = useGradingProgress();
+
   const [files, setFiles] = useState<File[]>([]);
   const [backgroundInfo, setBackgroundInfo] = useState("");
   const [studentName, setStudentName] = useState("");
   const [selectedTemplate, setSelectedTemplate] = useState<string>("");
-  const [phaseTimes, setPhaseTimes] = useState<Record<string, number>>({});
-  const [progressOpen, setProgressOpen] = useState(false);
-  const [progressStep, setProgressStep] = useState<ProgressStep>(null);
-  const [progressError, setProgressError] = useState<string | null>(null);
-  const [phaseElapsedMs, setPhaseElapsedMs] = useState<number | null>(null);
-  const [totalElapsedMs, setTotalElapsedMs] = useState(0);
-  const startTimeRef = useRef<number | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const cancelledRef = useRef(false);
 
   const handleUnsupportedFiles = useCallback(
     (rejected: FileRejection[], acceptedFormatsLabel: string) => {
@@ -95,35 +66,16 @@ export function Dashboard() {
 
   const uploadMutation = useMutation({
     mutationFn: async () => {
-      if (files.length === 1) {
-        return assignmentsApi.upload({
-          file: files[0],
-          student_name: studentName || undefined,
-          background_info: backgroundInfo || undefined,
-          template_id: selectedTemplate || undefined,
-        });
-      } else {
-        return assignmentsApi.batchUpload({
-          files,
-          background_info: backgroundInfo || undefined,
-          template_id: selectedTemplate || undefined,
-        });
-      }
+      // Batch upload for multiple files
+      return assignmentsApi.batchUpload({
+        files,
+        background_info: backgroundInfo || undefined,
+        template_id: selectedTemplate || undefined,
+      });
     },
-    onSuccess: (data) => {
-      if (files.length !== 1) {
-        navigate("/history");
-      }
-      // When single file, progress dialog flow handles navigation
+    onSuccess: () => {
+      navigate("/history");
     },
-  });
-
-  const gradeMutation = useMutation({
-    mutationFn: ({ id, background, templateId }: { id: string; background?: string; templateId?: string }) =>
-      assignmentsApi.grade(id, {
-        background: background || undefined,
-        template_id: templateId || undefined,
-      }),
   });
 
   const handleFilesSelected = (newFiles: File[]) => {
@@ -134,104 +86,38 @@ export function Dashboard() {
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  // Update total elapsed every 500ms while progress dialog is open
-  useEffect(() => {
-    if (!progressOpen || progressError) return;
-    const start = startTimeRef.current;
-    if (start == null) return;
-    const interval = setInterval(() => {
-      setTotalElapsedMs(Date.now() - start);
-    }, 500);
-    return () => clearInterval(interval);
-  }, [progressOpen, progressError]);
-
-  const handleCancelGrading = useCallback(() => {
-    cancelledRef.current = true;
-    abortControllerRef.current?.abort();
-  }, []);
-
   const handleSubmit = async () => {
     if (files.length === 0) return;
+
     if (files.length === 1) {
-      setProgressError(null);
-      setPhaseElapsedMs(null);
-      setTotalElapsedMs(0);
-      setPhaseTimes({});
-      setProgressOpen(true);
-      setProgressStep("uploading");
-      startTimeRef.current = Date.now();
-      cancelledRef.current = false;
-      abortControllerRef.current = new AbortController();
-      const signal = abortControllerRef.current.signal;
-      try {
-        const uploadRes = await assignmentsApi.gradeUploadPhase(
-          {
-            file: files[0],
-            student_name: studentName || undefined,
-            background: backgroundInfo || undefined,
-            template_id: selectedTemplate ? Number(selectedTemplate) : undefined,
-          },
-          signal,
-        );
-        if (cancelledRef.current) return;
-        if (uploadRes.error) {
-          setProgressError(uploadRes.error);
-          setPhaseElapsedMs(uploadRes.elapsed_ms ?? null);
-          return;
+      // Single file: use phased grading
+      // Find student ID if student name is selected
+      let studentId: number | undefined;
+      if (studentName) {
+        const selectedStudent = students.find((s) => s.name === studentName);
+        if (selectedStudent) {
+          studentId = selectedStudent.id;
         }
-        setPhaseElapsedMs(uploadRes.elapsed_ms ?? null);
-        if (uploadRes.elapsed_ms != null) {
-          setPhaseTimes((prev) => ({ ...prev, uploading: uploadRes.elapsed_ms as number }));
-        }
-        const assignmentId = uploadRes.assignment_id!;
-        setProgressStep("extracting");
-        const analyzeRes = await assignmentsApi.analyzeContextPhase(assignmentId, signal);
-        if (cancelledRef.current) return;
-        if (analyzeRes.error) {
-          setProgressError(analyzeRes.error);
-          setPhaseElapsedMs(analyzeRes.elapsed_ms ?? null);
-          return;
-        }
-        setPhaseElapsedMs(analyzeRes.elapsed_ms ?? null);
-        if (analyzeRes.elapsed_ms != null) {
-          setPhaseTimes((prev) => ({ ...prev, extracting: analyzeRes.elapsed_ms as number }));
-        }
-        setProgressStep("grading");
-        const runRes = await assignmentsApi.runGradingPhase(assignmentId, signal);
-        if (cancelledRef.current) return;
-        if (runRes.error) {
-          setProgressError(runRes.error);
-          setPhaseElapsedMs(runRes.elapsed_ms ?? null);
-          return;
-        }
-        setPhaseElapsedMs(runRes.elapsed_ms ?? null);
-        if (runRes.elapsed_ms != null) {
-          setPhaseTimes((prev) => ({ ...prev, grading: runRes.elapsed_ms as number }));
-        }
-        setProgressStep("completed");
-        await new Promise((r) => setTimeout(r, 1500));
-        if (cancelledRef.current) return;
+      }
+
+      const assignmentId = await startGradingProcess({
+        file: files[0],
+        studentId,
+        studentName: studentName || undefined,
+        background: backgroundInfo || undefined,
+        templateId: selectedTemplate || undefined,
+      });
+
+      if (assignmentId) {
+        // Auto-redirect to result page
         navigate(`/grade/${assignmentId}`);
-      } catch (err: unknown) {
-        if (cancelledRef.current) return;
-        const isAbort =
-          err instanceof Error &&
-          (err.name === "CanceledError" || err.name === "AbortError" || (err as { code?: string }).code === "ERR_CANCELED");
-        if (isAbort) return;
-        const message = err instanceof Error ? err.message : "Something went wrong";
-        setProgressError(message);
-        showNotification({ type: "error", message });
-      } finally {
-        setProgressOpen(false);
-        setProgressStep(null);
-        setPhaseElapsedMs(null);
-        setTotalElapsedMs(0);
-        setPhaseTimes({});
-        startTimeRef.current = null;
-        abortControllerRef.current = null;
+      } else if (progressError) {
+        showNotification({ type: "error", message: progressError });
       }
       return;
     }
+
+    // Multiple files: batch upload
     uploadMutation.mutate();
   };
 
@@ -240,71 +126,16 @@ export function Dashboard() {
   return (
     <div>
       {/* Progress dialog for single-file grading */}
-      {progressOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <Card className="w-full max-w-md mx-4 shadow-xl">
-            <CardHeader>
-              <CardTitle>Grading in progress</CardTitle>
-              <CardDescription>{progressError ? "An error occurred." : "Please wait while we process the assignment."}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {progressError ? (
-                <div className="space-y-3">
-                  <p className="text-sm text-red-600">{progressError}</p>
-                  {phaseElapsedMs != null && <p className="text-xs text-gray-500">Elapsed: {(phaseElapsedMs / 1000).toFixed(1)}s</p>}
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setProgressOpen(false);
-                      setProgressError(null);
-                      setProgressStep(null);
-                    }}
-                  >
-                    Close
-                  </Button>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <ul className="space-y-2">
-                    {(["uploading", "extracting", "grading", "completed"] as const).map((step) => {
-                      const isActive = progressStep === step;
-                      const order = ["uploading", "extracting", "grading", "completed"] as const;
-                      const stepIndex = order.indexOf(step);
-                      const currentIndex = progressStep ? order.indexOf(progressStep) : -1;
-                      const isDoneStep = currentIndex > stepIndex || (step === "completed" && progressStep === "completed");
-                      const phaseTime = phaseTimes[step];
-                      return (
-                        <li
-                          key={step}
-                          className={`flex items-center gap-2 text-sm ${isActive ? "font-medium text-primary" : isDoneStep ? "text-gray-500" : "text-gray-400"}`}
-                        >
-                          {isDoneStep ? (
-                            <CheckCircle className="h-4 w-4 shrink-0 text-green-500" />
-                          ) : isActive ? (
-                            <Sparkles className="h-4 w-4 shrink-0 animate-spin text-primary" />
-                          ) : (
-                            <span className="h-4 w-4 shrink-0 rounded-full border-2 border-gray-300" />
-                          )}
-                          <span>
-                            {PROGRESS_LABELS[step]}
-                            {isDoneStep && phaseTime && <span className="ml-2 italic text-xs">- {formatPhaseTime(phaseTime)}</span>}
-                          </span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs text-gray-500">Total: {formatElapsedMs(totalElapsedMs)}</p>
-                    <Button variant="outline" size="sm" onClick={handleCancelGrading}>
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      <GradingProgressDialog
+        open={progressOpen}
+        step={progressStep}
+        error={progressError}
+        phaseElapsedMs={phaseElapsedMs}
+        totalElapsedMs={totalElapsedMs}
+        phaseTimes={phaseTimes}
+        onCancel={handleCancelGrading}
+        onClose={closeProgress}
+      />
 
       <GreetingBanner />
 
@@ -471,6 +302,13 @@ interface StatCardProps {
   value: string;
   color: "blue" | "yellow" | "green" | "red";
 }
+
+const DASHBOARD_ACCEPT = {
+  "text/plain": [".txt"],
+  "application/pdf": [".pdf"],
+  "application/msword": [".doc"],
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+};
 
 function StatCard({ icon, label, value, color }: StatCardProps) {
   const colors = {

@@ -48,6 +48,9 @@ Respond with a single JSON object only, no markdown code fence, no other text. U
 # Placeholders: {student_name}, {student_salutation_rule}, {final_grading_instruction}, {student_homework}
 GRADING_PROMPT = """You are an expert English teacher grading a student's assignment.
 
+## Assignment Title
+{assignment_title}
+
 ## Student name (for personalization and Teacher's Comments salutation)
 {student_name}
 
@@ -55,6 +58,8 @@ GRADING_PROMPT = """You are an expert English teacher grading a student's assign
 {student_salutation_rule}
 
 ## Grading instruction (criteria and output format — follow this exactly)
+IMPORTANT: In the "Revised Essay" section, start with the assignment title as a heading (use <h3>{assignment_title}</h3>), then show the essay with corrections.
+
 {final_grading_instruction}
 
 ## Student's homework to grade

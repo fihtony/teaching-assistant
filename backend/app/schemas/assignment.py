@@ -93,42 +93,6 @@ class GradingResult(BaseModel):
     html_content: Optional[str] = None  # AI output as HTML when using HTML grading
 
 
-class GradeAssignmentRequest(BaseModel):
-    """Request to grade an assignment."""
-
-    assignment_id: int
-    background: Optional[str] = Field(
-        None,
-        description="Background information about the assignment, e.g., 'This is a book report on Alice in Wonderland'",
-    )
-    instructions: Optional[str] = Field(
-        None, description="Custom grading instructions from the teacher"
-    )
-    template_id: Optional[int] = Field(
-        None, description="ID of a saved grading template to use"
-    )
-    question_types: Optional[List[QuestionType]] = Field(
-        None, description="Types of questions in the assignment"
-    )
-
-
-class GradeAssignmentByPathBody(BaseModel):
-    """Optional body for POST /assignments/{id}/grade."""
-
-    background: Optional[str] = None
-    instructions: Optional[str] = None
-    template_id: Optional[int] = None
-    question_types: Optional[List[QuestionType]] = None
-
-
-class BatchGradeRequest(BaseModel):
-    """Request to batch grade multiple assignments."""
-
-    assignment_ids: List[int]
-    background: Optional[str] = None
-    instructions: Optional[str] = None
-    template_id: Optional[int] = None
-
 
 class AIGradingStatusEnum(str, Enum):
     """AI grading run status."""
