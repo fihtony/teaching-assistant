@@ -267,7 +267,7 @@ export function GradingPage() {
                 onChange={(e) => setSelectedTemplate(e.target.value)}
                 className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
               >
-                <option value="">Default Template</option>
+                <option value="">-- Select a template --</option>
                 {templates?.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.name}

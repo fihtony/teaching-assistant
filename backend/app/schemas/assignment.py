@@ -136,7 +136,7 @@ class AssignmentListItem(BaseModel):
     student_name: Optional[str] = None
     template_display: str  # Template name, "Custom Instruction", or "name + Custom"
     display_status: str  # "Ready for grading", "Uploaded", "Completed", etc.
-    display_date: str  # YYYY/MM/DD from assignment.updated_at or ai_grading.updated_at
+    display_date: str  # ISO 8601 datetime string from assignment.updated_at or ai_grading.updated_at
     filename: str
     source_format: SourceFormatEnum
     status: AssignmentStatusEnum

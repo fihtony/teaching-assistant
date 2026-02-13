@@ -15,7 +15,7 @@ from sqlalchemy import desc
 from app.core.ai_config import get_ai_provider_and_model, normalize_grading_model_display
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.core.datetime_utils import get_now_with_timezone, parse_iso_datetime_to_date_str, from_iso_datetime
+from app.core.datetime_utils import get_now_with_timezone, from_iso_datetime
 from app.models import (
     Assignment,
     AssignmentStatus,
@@ -73,20 +73,20 @@ def _first_line(text: Optional[str], max_len: int = 500) -> Optional[str]:
 def _display_status_and_date(assignment: Assignment, latest_ag: Optional[AIGrading]) -> tuple[str, str]:
     """
     Compute display_status and display_date per business rules.
-    Returns (display_status, display_date YYYY/MM/DD).
+    Returns (display_status, display_date ISO 8601 datetime string).
     """
     a_status = assignment.status.value if assignment.status else ""
     if a_status not in ("extracted",):
         # Use assignment status; date from assignment.updated_at
         status_label = a_status.replace("_", " ").title() if a_status else "—"
-        date_str = parse_iso_datetime_to_date_str(assignment.updated_at) or "—"
+        date_str = assignment.updated_at or "—"
         return (status_label, date_str)
     # assignment.status == extracted
     if not latest_ag or (latest_ag.status and latest_ag.status.value == "not_started"):
-        return ("Ready for grading", parse_iso_datetime_to_date_str(assignment.updated_at) or "—")
+        return ("Ready for grading", assignment.updated_at or "—")
     ag_status = latest_ag.status.value if latest_ag.status else ""
     status_label = ag_status.replace("_", " ").title() if ag_status else "—"
-    date_str = parse_iso_datetime_to_date_str(latest_ag.updated_at) or "—"
+    date_str = latest_ag.updated_at or "—"
     return (status_label, date_str)
 
 

@@ -3,6 +3,7 @@
  */
 
 import { useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
@@ -12,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Plus, Edit, Trash2, Save, X, BookOpen, ArrowLeft, FileText, Code, Braces } from "lucide-react";
+import { Plus, Edit, Trash2, Save, X, BookOpen, ArrowLeft, FileText, Code, Braces, Sparkles } from "lucide-react";
 import { useNotification } from "@/contexts";
 import type { GradingTemplate } from "@/types";
 import type { QuestionTypeConfig } from "@/types";
@@ -49,6 +50,7 @@ const defaultQuestionTypes = [
 ];
 
 export function TemplatesPage() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { show: showNotification } = useNotification();
   const [isCreating, setIsCreating] = useState(false);
@@ -138,9 +140,7 @@ export function TemplatesPage() {
     });
   };
 
-  function normalizeQuestionTypes(
-    raw: GradingTemplate["question_types"] | undefined
-  ): typeof defaultQuestionTypes {
+  function normalizeQuestionTypes(raw: GradingTemplate["question_types"] | undefined): typeof defaultQuestionTypes {
     const fromDb = Array.isArray(raw) ? raw : [];
     const dbByType: Record<string, { weight: number; enabled: boolean; name?: string }> = {};
     fromDb.forEach((qt) => {
@@ -166,9 +166,7 @@ export function TemplatesPage() {
   const handleEdit = (template: GradingTemplate) => {
     setEditingId(template.id);
     setIsCreating(false);
-    const words = Array.isArray(template.encouragement_words)
-      ? template.encouragement_words
-      : defaultEncouragementWords;
+    const words = Array.isArray(template.encouragement_words) ? template.encouragement_words : defaultEncouragementWords;
     setEncouragementWordsText(words.join(", "));
     setFormData({
       name: template.name,
@@ -193,7 +191,10 @@ export function TemplatesPage() {
       instructions: formData.instructions.trim() || "No instructions provided.",
       instruction_format: formData.instruction_format,
       encouragement_words: (() => {
-        const arr = encouragementWordsText.split(",").map((s) => s.trim()).filter(Boolean);
+        const arr = encouragementWordsText
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
         return arr.length ? arr : defaultEncouragementWords;
       })(),
       question_types: questionTypes,
@@ -213,7 +214,7 @@ export function TemplatesPage() {
     setFormData((prev) => ({
       ...prev,
       question_types: prev.question_types.map((qt, i) =>
-        i === index ? { ...qt, [field]: value, ...(field === "enabled" && value === false ? { weight: 0 } : {}) } : qt
+        i === index ? { ...qt, [field]: value, ...(field === "enabled" && value === false ? { weight: 0 } : {}) } : qt,
       ),
     }));
   };
@@ -257,18 +258,20 @@ export function TemplatesPage() {
             <h1 className="text-2xl font-bold text-gray-900">
               {isFormVisible ? (editingId ? "Edit Instruction" : "New Instruction") : "Instructions"}
             </h1>
-            {isFormVisible && (
-              <p className="text-[0.9rem] text-gray-600">
-                Configure grading criteria and question type weights
-              </p>
-            )}
+            {isFormVisible && <p className="text-[0.9rem] text-gray-600">Configure grading criteria and question type weights</p>}
           </div>
         </div>
         {!isFormVisible && (
-          <Button onClick={() => setIsCreating(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            New Instruction
-          </Button>
+          <div className="flex gap-2">
+            <Button onClick={() => setIsCreating(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              New Instruction
+            </Button>
+            <Button variant="outline" onClick={() => navigate("/build-instruction")}>
+              <Sparkles className="mr-2 h-4 w-4" />
+              Build with AI
+            </Button>
+          </div>
         )}
       </div>
 
@@ -278,7 +281,9 @@ export function TemplatesPage() {
           <CardContent className="space-y-6 pt-6">
             {/* a. Instruction name - full width */}
             <div>
-              <Label htmlFor="name" className="text-[1.3em] font-bold">Instruction name</Label>
+              <Label htmlFor="name" className="text-[1.3em] font-bold">
+                Instruction name
+              </Label>
               <Input
                 id="name"
                 value={formData.name}
@@ -290,7 +295,9 @@ export function TemplatesPage() {
 
             {/* b. Description - 1 row to start, expandable */}
             <div>
-              <Label htmlFor="description" className="text-[1.3em] font-bold">Description</Label>
+              <Label htmlFor="description" className="text-[1.3em] font-bold">
+                Description
+              </Label>
               <Textarea
                 id="description"
                 value={formData.description}
@@ -399,9 +406,9 @@ export function TemplatesPage() {
                         ...prev,
                         instruction_format: e.target.value as "markdown" | "html" | "text" | "json",
                       }))
-                  }
-                  className="rounded border border-gray-300 px-3 py-1.5 text-sm"
-                >
+                    }
+                    className="rounded border border-gray-300 px-3 py-1.5 text-sm"
+                  >
                     <option value="text">Plain text</option>
                     <option value="markdown">Markdown</option>
                     <option value="html">HTML</option>
@@ -453,9 +460,7 @@ export function TemplatesPage() {
                     onChange={(e) => setFormData((prev) => ({ ...prev, instructions: e.target.value }))}
                     onBlur={handleInstructionsBlur}
                     placeholder={
-                      formData.instruction_format === "json"
-                        ? "Valid JSON (auto-formatted on blur)"
-                        : "Enter grading instructions..."
+                      formData.instruction_format === "json" ? "Valid JSON (auto-formatted on blur)" : "Enter grading instructions..."
                     }
                     className="min-h-[120px] w-full resize-y font-mono text-sm"
                     rows={6}
@@ -492,64 +497,60 @@ export function TemplatesPage() {
             </Card>
           ) : (
             templates?.map((template) => (
-            <Card key={template.id}>
-              <CardHeader>
-                <div className="min-w-0">
-                  <CardTitle className="line-clamp-2 text-lg" title={template.name}>
-                    {template.name || "—"}
-                  </CardTitle>
-                  {template.description != null && template.description !== "" && (
-                    <CardDescription className="mt-1 line-clamp-2" title={template.description}>
-                      {template.description}
-                    </CardDescription>
-                  )}
-                </div>
-                {template.is_default && (
-                  <span className="mt-2 inline-block rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
-                    Default
-                  </span>
-                )}
-              </CardHeader>
-              <CardContent>
-                <div className="mb-4 space-y-1">
-                  {(() => {
-                    const types = (Array.isArray(template.question_types) ? template.question_types : []).map(
-                      (qt) => (typeof qt === "string" ? { type: qt, name: qt, weight: 0, enabled: true } : qt)
-                    );
-                    const enabled = types.filter((qt) => qt.enabled !== false);
-                    return (
-                      <>
-                        {enabled.slice(0, 3).map((qt) => (
-                          <div key={qt.type} className="flex items-center justify-between text-sm">
-                            <span className="text-gray-600">{qt.name}</span>
-                            <span className="font-medium">{qt.weight}%</span>
-                          </div>
-                        ))}
-                        {enabled.length > 3 && (
-                          <p className="text-xs text-gray-400">+{enabled.length - 3} more...</p>
-                        )}
-                      </>
-                    );
-                  })()}
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="flex items-center text-muted-foreground" title={`Format: ${(template.instruction_format || "text")}`}>
-                    <FormatIcon format={template.instruction_format || "text"} />
-                  </span>
-                  <div className="flex gap-2">
-                    <Button variant="ghost" size="sm" onClick={() => handleEdit(template)}>
-                      <Edit className="mr-1 h-4 w-4" />
-                      Edit
-                    </Button>
-                    {!template.is_default && (
-                      <Button variant="ghost" size="sm" onClick={() => handleDeleteClick(template)}>
-                        <Trash2 className="mr-1 h-4 w-4 text-red-500" />
-                      </Button>
+              <Card key={template.id}>
+                <CardHeader>
+                  <div className="min-w-0">
+                    <CardTitle className="line-clamp-2 text-lg" title={template.name}>
+                      {template.name || "—"}
+                    </CardTitle>
+                    {template.description != null && template.description !== "" && (
+                      <CardDescription className="mt-1 line-clamp-2" title={template.description}>
+                        {template.description}
+                      </CardDescription>
                     )}
                   </div>
-                </div>
-              </CardContent>
-            </Card>
+                  {template.is_default && (
+                    <span className="mt-2 inline-block rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">Default</span>
+                  )}
+                </CardHeader>
+                <CardContent>
+                  <div className="mb-4 space-y-1">
+                    {(() => {
+                      const types = (Array.isArray(template.question_types) ? template.question_types : []).map((qt) =>
+                        typeof qt === "string" ? { type: qt, name: qt, weight: 0, enabled: true } : qt,
+                      );
+                      const enabled = types.filter((qt) => qt.enabled !== false);
+                      return (
+                        <>
+                          {enabled.slice(0, 3).map((qt) => (
+                            <div key={qt.type} className="flex items-center justify-between text-sm">
+                              <span className="text-gray-600">{qt.name}</span>
+                              <span className="font-medium">{qt.weight}%</span>
+                            </div>
+                          ))}
+                          {enabled.length > 3 && <p className="text-xs text-gray-400">+{enabled.length - 3} more...</p>}
+                        </>
+                      );
+                    })()}
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex items-center text-muted-foreground" title={`Format: ${template.instruction_format || "text"}`}>
+                      <FormatIcon format={template.instruction_format || "text"} />
+                    </span>
+                    <div className="flex gap-2">
+                      <Button variant="ghost" size="sm" onClick={() => handleEdit(template)}>
+                        <Edit className="mr-1 h-4 w-4" />
+                        Edit
+                      </Button>
+                      {!template.is_default && (
+                        <Button variant="ghost" size="sm" onClick={() => handleDeleteClick(template)}>
+                          <Trash2 className="mr-1 h-4 w-4 text-red-500" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             ))
           )}
         </div>

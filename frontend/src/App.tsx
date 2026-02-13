@@ -5,7 +5,16 @@
 import { useEffect } from "react";
 import { Routes, Route } from "react-router-dom";
 import { Layout } from "@/components/layout";
-import { Dashboard, GradingResultPage, HistoryPage, TemplatesPage, SettingsPage, StudentsPage, GradingPage } from "@/pages";
+import {
+  Dashboard,
+  GradingResultPage,
+  HistoryPage,
+  TemplatesPage,
+  SettingsPage,
+  StudentsPage,
+  GradingPage,
+  BuildInstructionPage,
+} from "@/pages";
 
 function App() {
   useEffect(() => {
@@ -23,6 +32,7 @@ function App() {
         <Route path="/grade/:id" element={<GradingResultPage />} />
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/templates" element={<TemplatesPage />} />
+        <Route path="/build-instruction" element={<BuildInstructionPage />} />
         <Route path="/students" element={<StudentsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Routes>

@@ -2,18 +2,17 @@
  * History page - view assignments and grading history (from ai_grading + assignments)
  */
 
-import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { assignmentsApi } from "@/services/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusBadge } from "@/components/StatusBadge";
 import { FileText, Search, ChevronLeft, ChevronRight, Trash2, Filter, ArrowUp, ArrowDown, ArrowUpDown, Minus } from "lucide-react";
-import type { Assignment, AssignmentListResponse } from "@/types";
+import type { Assignment } from "@/types";
 
-type SortField = "date" | "student_name" | "title" | "display_status";
+type SortField = "date" | "student_name" | "title";
 type SortOrder = "asc" | "desc" | null;
 
 function formatDisplayDate(value: string | undefined): string {
@@ -24,20 +23,62 @@ function formatDisplayDate(value: string | undefined): string {
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, "0");
     const day = String(d.getDate()).padStart(2, "0");
-    return `${year}/${month}/${day}`;
+    return `${year}-${month}-${day}`;
   } catch {
     return value;
   }
 }
 
+function formatDisplayTime(value: string | undefined): string {
+  if (!value) return "—";
+  try {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "";
+    const hours = String(d.getHours()).padStart(2, "0");
+    const minutes = String(d.getMinutes()).padStart(2, "0");
+    const seconds = String(d.getSeconds()).padStart(2, "0");
+    return `${hours}:${minutes}:${seconds}`;
+  } catch {
+    return "";
+  }
+}
+
 export function HistoryPage() {
   const navigate = useNavigate();
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [sortBy, setSortBy] = useState<SortField | null>(null);
-  const [sortOrder, setSortOrder] = useState<SortOrder>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Initialize state from URL parameters with fallbacks
+  const page = parseInt(searchParams.get("page") || "1", 10);
+  const pageSize = parseInt(searchParams.get("pageSize") || "10", 10);
+  const search = searchParams.get("search") || "";
+  const statusFilter = searchParams.get("statusFilter") || "all";
+  const sortBy = (searchParams.get("sortBy") as SortField | null) || null;
+  const sortOrder = (searchParams.get("sortOrder") as SortOrder) || null;
+
+  // Helper function to update URL parameters
+  const updateSearchParams = (updates: Record<string, string | number | null>) => {
+    const newParams = new URLSearchParams(searchParams);
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value === null || value === "" || (typeof value === "string" && value === "all")) {
+        newParams.delete(key);
+      } else {
+        newParams.set(key, String(value));
+      }
+    });
+    setSearchParams(newParams);
+  };
+
+  const setPageUrl = (p: number) => updateSearchParams({ page: p, pageSize });
+  const setPageSizeUrl = (ps: number) => updateSearchParams({ pageSize: ps, page: 1 });
+  const setSearchUrl = (s: string) => updateSearchParams({ search: s, page: 1 });
+  const setStatusFilterUrl = (sf: string) => updateSearchParams({ statusFilter: sf, page: 1 });
+  const setSortByUrl = (field: SortField | null, order: SortOrder) => {
+    updateSearchParams({
+      sortBy: field,
+      sortOrder: order,
+      page: 1,
+    });
+  };
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => assignmentsApi.delete(id),
@@ -73,19 +114,17 @@ export function HistoryPage() {
       // Same field clicked
       if (sortOrder === null) {
         // Was unsorted, now ascending
-        setSortOrder("asc");
+        setSortByUrl(field, "asc");
       } else if (sortOrder === "asc") {
         // Was ascending, now descending
-        setSortOrder("desc");
+        setSortByUrl(field, "desc");
       } else {
         // Was descending, now unsorted (null)
-        setSortOrder(null);
-        setSortBy(null);
+        setSortByUrl(null, null);
       }
     } else {
       // Different field clicked
-      setSortBy(field);
-      setSortOrder("asc");
+      setSortByUrl(field, "asc");
     }
   };
 
@@ -125,14 +164,18 @@ export function HistoryPage() {
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
             <Input
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => setSearchUrl(e.target.value)}
               placeholder="Search by title or student name..."
               className="pl-10"
             />
           </div>
           <div className="flex items-center gap-2">
             <Filter className="h-4 w-4 text-gray-400" />
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-md border px-3 py-2 text-sm">
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilterUrl(e.target.value)}
+              className="rounded-md border px-3 py-2 text-sm"
+            >
               <option value="all">All Status</option>
               {statusOptions.map((status) => (
                 <option key={status} value={status}>
@@ -180,14 +223,8 @@ export function HistoryPage() {
                       </div>
                     </th>
                     <th className="pb-2 pr-4 font-medium">Template</th>
-                    <th
-                      className="pb-2 pr-4 font-medium cursor-pointer hover:bg-gray-100 select-none"
-                      onClick={() => handleSort("display_status")}
-                    >
-                      <div className="flex items-center gap-1">
-                        Status
-                        {getSortIcon("display_status")}
-                      </div>
+                    <th className="pb-2 pr-4 font-medium">
+                      <div className="flex items-center gap-1">Status</div>
                     </th>
                     <th className="pb-2 pr-4 font-medium cursor-pointer hover:bg-gray-100 select-none" onClick={() => handleSort("date")}>
                       <div className="flex items-center gap-1">
@@ -211,7 +248,10 @@ export function HistoryPage() {
                       <td className="py-3 pr-4">
                         <StatusBadge status={assignment.display_status || assignment.status} />
                       </td>
-                      <td className="py-3 pr-4 text-gray-600">{formatDisplayDate(assignment.display_date)}</td>
+                      <td className="py-3 pr-4 text-gray-600">
+                        <div className="whitespace-nowrap">{formatDisplayDate(assignment.display_date)}</div>
+                        <div className="text-xs text-gray-500 whitespace-nowrap">{formatDisplayTime(assignment.display_date)}</div>
+                      </td>
                       <td className="py-3">
                         <Button
                           variant="ghost"
@@ -240,8 +280,7 @@ export function HistoryPage() {
               <select
                 value={pageSize}
                 onChange={(e) => {
-                  setPageSize(Number(e.target.value));
-                  setPage(1); // Reset to first page when changing page size
+                  setPageSizeUrl(Number(e.target.value));
                 }}
                 className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
               >
@@ -254,13 +293,13 @@ export function HistoryPage() {
             </div>
             {totalPages > 1 && (
               <div className="flex items-center justify-center gap-2">
-                <Button variant="outline" size="icon" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>
+                <Button variant="outline" size="icon" disabled={page === 1} onClick={() => setPageUrl(page - 1)}>
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
                 <span className="text-sm text-gray-600">
                   Page {page} of {totalPages}
                 </span>
-                <Button variant="outline" size="icon" disabled={page === totalPages} onClick={() => setPage((p) => p + 1)}>
+                <Button variant="outline" size="icon" disabled={page === totalPages} onClick={() => setPageUrl(page + 1)}>
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
