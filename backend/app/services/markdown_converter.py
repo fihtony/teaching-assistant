@@ -38,7 +38,21 @@ class MarkdownGradingConverter:
         if not markdown_content:
             return ""
 
-        html = markdown_content
+        # Preserve line breaks in "Dear X:" greeting format by marking them
+        # This ensures that greetings like "Dear Student:\nWell done..." maintain line separation
+        markdown_content_marked = markdown_content
+        lines = markdown_content_marked.split("\n")
+        preserved_lines = []
+        for i, line in enumerate(lines):
+            preserved_lines.append(line)
+            # Mark line breaks after "Dear" greetings if followed by non-header content
+            if line.strip().startswith("Dear") and i + 1 < len(lines):
+                next_line = lines[i + 1].strip()
+                if next_line and not next_line.startswith("#"):
+                    preserved_lines.append("<!--BREAK-->")
+        markdown_content_marked = "\n".join(preserved_lines)
+
+        html = markdown_content_marked
 
         # Convert special markup to HTML FIRST, before headers/formatting
         # Order matters: handle replacements first, then deletions and additions
@@ -57,6 +71,9 @@ class MarkdownGradingConverter:
         # Note: inline formatting already applied above, so _convert_markdown_formatting
         # should skip the _apply_inline_formatting step for already-formatted content
         html = MarkdownGradingConverter._convert_markdown_formatting(html)
+
+        # Replace break markers with <br> tags
+        html = html.replace("<!--BREAK-->", "<br>")
 
         return html
 

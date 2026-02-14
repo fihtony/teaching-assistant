@@ -116,6 +116,7 @@ export function useGradingProgress(): UseGradingProgressReturn {
                 student_name: config.studentName || undefined,
                 background: config.background || undefined,
                 template_id: config.templateId ? Number(config.templateId) : undefined,
+                instructions: config.instructions || undefined,
               },
               signal,
             );

@@ -27,7 +27,7 @@ GRADING_CONTEXT_PROMPT = """You are an expert English teacher preparing grading 
 ## Grading criteria template (focus areas and standards to evaluate)
 {template_instruction}
 
-## Additional custom instructions from the teacher (if any)
+## Additional custom instructions from the teacher (if any, READ CAREFULLY)
 {custom_instruction}
 
 ---
@@ -41,9 +41,11 @@ Your task:
    - Any student-level considerations (vocabulary level, grade, etc.)
 
 3. Extract or infer output format requirements from the instructions and describe them under "output_requirements":
-   - Expected number and names of sections in the graded output
-   - What each section should contain (e.g., "Revised Essay with inline corrections", "Detailed Corrections with bullet points", "Teacher's Comments with letter format")
-   - CRITICAL: Specify that corrections MUST use DOUBLE BRACES for additions/replacements: use ~~deleted~~ for deletions, use {{added}} for new text, and ~~old~~{{new}} for replacements. NEVER use single braces.
+   - Output format MUST be MARKDOWN with appropriate headers (not JSON, not code blocks, not HTML)
+   - Describe the expected sections, subsections, and structure that the teacher wants
+   - Specify what formatting to use (headers, lists, emphasis, etc.)
+   - Example: "Provide a cover section with overall feedback, then section for each corrected paragraph, with ~~deletions~~ and {{additions}} marked inline"
+   - Include: Corrections MUST use DOUBLE BRACES for additions: ~~deleted~~ for deletions, {{added}} for new text, ~~old~~{{new}} for replacements. NEVER use single braces or JSON format.
 
 Respond with a single JSON object only, no markdown code fence, no other text. Use this exact structure:
 {{"extracted_references": {{"books": [], "articles": [], "authors": []}}, "final_grading_instruction": "your full instruction text here", "output_requirements": "description of expected output structure and format"}}
@@ -113,53 +115,21 @@ You may ONLY use the following markdown formatting styles (the system renders ON
 
 ## How to Format Your Response
 
-**SECTION 1: Revised Essay**
-- Show the student's full essay with inline corrections using ~~deleted~~ and {{added}} markers
-- NO additional commentary in this section
+Format your response using ONLY markdown (headers, bold, lists, etc.). Follow the specific output requirements described above. Use markdown headers (## and ###) to structure your response as specified.
 
-**SECTION 2: Detailed Corrections**
-Format as a bulleted list. Each bullet MUST have this exact structure:
-```
-- **Category Name**:
-  Quoted example: "exact text from essay here"
-  Explanation: why you made this change and the teaching reason
-```
-For example:
-```
-- **Essay Structure**:
-  "our world is brighter" — You have three clear body paragraphs
-  Explanation: Each paragraph has one main idea and examples
-```
-
-**SECTION 3: Teacher's Comments**
-Format EXACTLY as shown:
-```
-Dear [Student Name]:
-Welcome message referencing their recent activity.
-
-### **What You Did Well**
-- "exact quote from essay" — explanation of the strength
-- "another quote" — explanation
-
-### **Areas for Improvement**
-- "exact quote from essay" — Problem explanation. Model sentence: "better version here"
-- "another quote" — Problem. Model: "better version"
-
-Closing encouraging sentence.
-```
-Replace [Student Name] with the actual student name (given in the "Student name" section above).
-
-**IMPORTANT for all sections**:
-- Use markdown headers: ## for main sections (Revised Essay, Detailed Corrections, Teacher's Comments)
-- Use markdown headers: ### ONLY for subsections under Teacher's Comments (**What You Did Well** and **Areas for Improvement**)
+**Markdown formatting rules**:
+- Use markdown headers to create sections and subsections
 - Use **bold** for emphasis and category names
-- Use `- bullet` syntax for all bulleted lists
-- Include blank lines between subsections
-- Do NOT use HTML tags, code fences, or any unspecified formatting
-- For deletion/addition corrections: ALWAYS use exactly TWO opening braces and TWO closing braces for additions (e.g., {{{{text}}}}) not {{{{single}}}}
-- Output ONLY the three sections specified in output requirements
-- NEVER put headers (### ) inside bullet points — headers go on their own line, bullets go below them
+- Use `- bullet` syntax for bulleted lists
+- Use ~~deleted~~ for deletions and {{added}} for additions in your corrections
+- Use ~~old~~{{new}} for replacements
+- Include blank lines between sections for clarity
+- Do NOT use HTML tags, triple backticks, or JSON format
 
----
+**IMPORTANT: Preserve Essay Title**
+- If the student's homework starts with a title line (before the essay body), include that title as the first line in the "Revised Essay" section
+- The title should appear on its own line before the essay body
+- Do not apply error corrections to the title itself—keep it as-is
 
-Now grade the student's homework according to the grading instruction and output format requirements specified above."""
+Now grade the student's homework according to the grading instruction and output_requirements specified above. Output ONLY pure markdown following the format in output_requirements — MUST not include JSON, code blocks, or any other format.
+"""

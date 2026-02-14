@@ -124,6 +124,7 @@ export function GradingPage() {
       background: background || undefined,
       templateId: selectedTemplate || undefined,
       contentText: contentText || undefined,
+      instructions: additionalInstructions || undefined,
     });
 
     if (assignmentId) {

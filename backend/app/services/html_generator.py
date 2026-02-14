@@ -15,7 +15,7 @@ class HTMLGenerator:
         corrections: str,
         comments: str,
         output_path: str,
-        student_name: str = "Student"
+        student_name: str = "Student",
     ) -> str:
         """
         Generate complete HTML file with embedded styles.
@@ -35,11 +35,7 @@ class HTMLGenerator:
         return output_path
 
     def _build_html(
-        self,
-        essay: str,
-        corrections: str,
-        comments: str,
-        student_name: str = "Student"
+        self, essay: str, corrections: str, comments: str, student_name: str = "Student"
     ) -> str:
         """Build complete HTML document with embedded CSS."""
         css = self._get_css_styles()
@@ -69,35 +65,45 @@ class HTMLGenerator:
         """
         Wrap essay content in paragraph tags if not already wrapped.
         Handle mixed content (some with tags, some without).
+        Preserve line breaks within paragraphs as <br> tags.
         """
-        lines = content.split('\n')
+        lines = content.split("\n")
         wrapped_lines = []
         current_paragraph = []
 
         for line in lines:
             line = line.strip()
 
-            # Skip empty lines
+            # Skip empty lines - they mark paragraph boundaries
             if not line:
                 if current_paragraph:
-                    wrapped_lines.append(f"<p>{' '.join(current_paragraph)}</p>")
+                    # Join lines with <br> to preserve line breaks within paragraph
+                    paragraph_content = "<br>".join(current_paragraph)
+                    wrapped_lines.append(f"<p>{paragraph_content}</p>")
                     current_paragraph = []
                 continue
 
             # Already has HTML tags - keep as is
-            if line.startswith('<') and any(tag in line for tag in ['<h1>', '<h2>', '<h3>', '<p>', '<ul>', '<li>']):
+            if line.startswith("<") and any(
+                tag in line for tag in ["<h1>", "<h2>", "<h3>", "<p>", "<ul>", "<li>"]
+            ):
                 if current_paragraph:
-                    wrapped_lines.append(f"<p>{' '.join(current_paragraph)}</p>")
+                    # Join lines with <br> to preserve line breaks within paragraph
+                    paragraph_content = "<br>".join(current_paragraph)
+                    wrapped_lines.append(f"<p>{paragraph_content}</p>")
                     current_paragraph = []
                 wrapped_lines.append(line)
             else:
+                # Accumulate lines in current paragraph
                 current_paragraph.append(line)
 
         # Don't forget the last paragraph
         if current_paragraph:
-            wrapped_lines.append(f"<p>{' '.join(current_paragraph)}</p>")
+            # Join lines with <br> to preserve line breaks within paragraph
+            paragraph_content = "<br>".join(current_paragraph)
+            wrapped_lines.append(f"<p>{paragraph_content}</p>")
 
-        return '\n'.join(wrapped_lines)
+        return "\n".join(wrapped_lines)
 
     def _get_css_styles(self) -> str:
         """Return CSS styles for red-ink grading."""
@@ -174,7 +180,7 @@ strong {
 
     def _save_html(self, content: str, path: str):
         """Save HTML content to file."""
-        with open(path, 'w', encoding='utf-8') as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(content)
 
 
@@ -189,7 +195,7 @@ def parse_ai_response(result: str) -> Tuple[str, str, str]:
         Tuple of (essay_html, corrections_html, comments_html)
     """
     # Split by h2 headers
-    sections = result.split('<h2>')
+    sections = result.split("<h2>")
 
     essay_html = ""
     corrections_html = ""
@@ -203,11 +209,11 @@ def parse_ai_response(result: str) -> Tuple[str, str, str]:
             essay_html = extract_essay_content(section)
 
         # Corrections section
-        elif 'correction' in section_lower or 'detailed' in section_lower:
+        elif "correction" in section_lower or "detailed" in section_lower:
             corrections_html = f"<h2>{section}"
 
         # Teacher comments section
-        elif 'teacher' in section_lower and 'comment' in section_lower:
+        elif "teacher" in section_lower and "comment" in section_lower:
             comments_html = f"<h2>{section}"
 
     return essay_html, corrections_html, comments_html
@@ -218,7 +224,7 @@ def extract_essay_content(section: str) -> str:
     Extract essay content from the first section.
     Returns content after h1 tag, excluding the header itself.
     """
-    lines = section.split('\n')
+    lines = section.split("\n")
     content = []
     skip_h1 = True
 
@@ -227,18 +233,18 @@ def extract_essay_content(section: str) -> str:
 
         # Skip the h1 header line
         if skip_h1:
-            if '<h1>' in line or '<h1 ' in line:
+            if "<h1>" in line or "<h1 " in line:
                 continue
             if not line:
                 continue
             skip_h1 = False
 
         # Stop at next section header
-        if line.startswith('<h2>') or line.startswith('<h2 '):
+        if line.startswith("<h2>") or line.startswith("<h2 "):
             break
 
         # Collect essay content
         if line:
             content.append(line)
 
-    return '\n'.join(content)
+    return "\n".join(content)

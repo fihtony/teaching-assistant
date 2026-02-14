@@ -230,6 +230,29 @@ class AIGradingService:
             if markdown.endswith("```"):
                 markdown = markdown[:-3].strip()
 
+        # SAFEGUARD: If response is JSON instead of markdown, try to convert it
+        if markdown.startswith("{"):
+            logger.warning(
+                "Grading prompt returned JSON instead of markdown; attempting to convert..."
+            )
+            try:
+                data = json.loads(markdown)
+                if isinstance(data, dict) and data:
+                    # Build markdown from all key-value pairs
+                    sections = []
+                    for key, value in data.items():
+                        if value:
+                            # Use key as markdown header
+                            sections.append(f"## {key}\n{str(value).strip()}")
+
+                    if sections:
+                        markdown = "\n\n".join(sections)
+                        logger.info(
+                            "Successfully converted JSON response to markdown format"
+                        )
+            except (json.JSONDecodeError, AttributeError, ValueError) as e:
+                logger.warning("Could not parse JSON response; using as-is: %s", e)
+
         return markdown
 
 
