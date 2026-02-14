@@ -46,66 +46,57 @@
 ## Student Level Considerations
 
 **Vocabulary Source:** 240 G4 and WW3000 L4
+
 - Use only grade-appropriate vocabulary
 
 **Grammar Scope:**
+
 - Covered: Simple sentences, Compound sentences, Basic time tenses, Introduction to complex sentences
 - Not Fully Covered: Perfect tense
 
 ---
 
-## Teacher's Comments Format
+## Teacher's Comments Structure
 
-The Teacher's Comments section MUST follow this exact structure:
-
-```
-Dear [Student Name],
-
-[Optional: 1 warm greeting sentence based on context/weather/season]
+Your feedback should include:
 
 ### What You Did Well
 
-- [Specific strength with example from essay - complete explanation on separate line]
-
-- [Specific strength with example from essay - complete explanation on separate line]
-
-- [Specific strength with example if applicable - complete explanation on separate line]
+- Identify at least 2-3 specific strengths
+- Include exact examples from the essay
+- Explain why it's effective
 
 ### Areas for Improvement
 
-- [Specific area with example + better model sentence - complete explanation on separate line]
+- Identify at least 2-3 areas to develop
+- Include exact examples showing the issue
+- Provide a better model sentence for each
+- Explain how the improvement would strengthen the essay
 
-- [Specific area with example + better model sentence - complete explanation on separate line]
-
-- [Specific area with example if applicable - complete explanation on separate line]
-
-[Encouraging closing sentence]
-```
-
-**Important Rules:**
-- Use bullet points (•) for both sections
-- Each bullet must include specific example from essay
-- For improvements, always provide a better model sentence
-- Natural teacher tone (YOU perspective)
-- NO sentence limit - be thorough
+Use warm, encouraging, supportive teacher tone throughout.
 
 ---
 
-## Quick Checklist
+## Evaluation Checklist
 
 ### Structure
-- [ ] Title present (if required)
-- [ ] 5-paragraph structure
-- [ ] Clear topic sentences
-- [ ] Essay stays focused
+
+- 5-paragraph structure present (intro, 3 body, conclusion)
+- Clear topic sentences in each paragraph
+- Essay stays focused on the main topic
+- Paragraphs are properly developed
 
 ### Mechanics
-- [ ] Basic spelling
-- [ ] Time tense consistency
-- [ ] Subject-verb agreement
 
-### Content
-- [ ] Clear argument/opinion
-- [ ] Logical flow
-- [ ] Supporting examples
-- [ ] Effective conclusion
+- Spelling is mostly accurate for grade level
+- Sentence variety (simple and compound sentences)
+- Consistent use of verb tenses
+- Subject-verb agreement correct
+
+### Content & Reasoning
+
+- Clear opinion or argument stated
+- Logical development of ideas
+- Supporting examples provided
+- Transitions between ideas
+- Strong conclusion that restates main idea

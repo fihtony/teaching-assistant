@@ -6,7 +6,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import type { FileRejection } from "react-dropzone";
-import { studentsApi, settingsApi, templatesApi } from "@/services/api";
+import { assignmentsApi, studentsApi, settingsApi, templatesApi } from "@/services/api";
 import { useNotification } from "@/contexts/NotificationContext";
 import { useGradingProgress } from "@/hooks/useGradingProgress";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,7 +16,8 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { FileUpload } from "@/components/common/FileUpload";
 import { GradingProgressDialog } from "@/components/common/GradingProgressDialog";
-import { ArrowLeft, Sparkles, Loader2, Save, Copy, Send } from "lucide-react";
+import { GradedOutputDisplay } from "@/components/common/GradedOutputDisplay";
+import { ArrowLeft, Sparkles, Loader2, Copy, Send } from "lucide-react";
 
 const CONTENT_ACCEPT = {
   "text/plain": [".txt"],
@@ -43,7 +44,6 @@ export function BuildInstructionPage() {
 
   // State for AI output
   const [aiOutput, setAiOutput] = useState<string>("");
-  const [hasGradedOnce, setHasGradedOnce] = useState(false);
 
   // State for chat
   const [chatMessages, setChatMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
@@ -53,14 +53,12 @@ export function BuildInstructionPage() {
   // State for template selection dialog
   const [showTemplateDialog, setShowTemplateDialog] = useState(false);
 
-  // State for saving template
-  const [isSavingTemplate, setIsSavingTemplate] = useState(false);
-  const [templateName, setTemplateName] = useState("");
-  const [templateDesc, setTemplateDesc] = useState("");
-
   // State for AI config - read from settings
-  const [aiProvider, setAiProvider] = useState("copilot");
-  const [aiModel, setAiModel] = useState("gpt-4o");
+  const [aiProvider, setAiProvider] = useState<string | null>(null);
+  const [aiModel, setAiModel] = useState<string | null>(null);
+  const [defaultModel, setDefaultModel] = useState<string | null>(null);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
 
   // Grading progress
   const {
@@ -93,10 +91,55 @@ export function BuildInstructionPage() {
 
   useEffect(() => {
     if (aiConfig) {
-      setAiProvider(aiConfig.provider || "copilot");
-      setAiModel(aiConfig.model || "gpt-4o");
+      const provider = aiConfig.default_provider || "copilot";
+      const model = aiConfig.default_model || "gpt-4o";
+      setAiProvider(provider);
+      setDefaultModel(model); // Store the default model from settings
+      setAiModel(model); // Initialize to default model as well
     }
   }, [aiConfig]);
+
+  // Fetch available models when provider changes
+  useEffect(() => {
+    const fetchModels = async () => {
+      if (!aiProvider) return;
+      setLoadingModels(true);
+      try {
+        const result = await settingsApi.getModels(aiProvider);
+        if (result.models) {
+          // Extract model IDs (not names) since settings stores model IDs
+          const modelStrings = result.models.map((m) => (typeof m === "string" ? m : m.id)).filter((m) => m);
+          // Remove duplicates by using Set
+          const uniqueModels = Array.from(new Set(modelStrings));
+          setAvailableModels(uniqueModels);
+
+          // Set the model to the default one from settings if available, otherwise use the first model
+          if (defaultModel && uniqueModels.includes(defaultModel)) {
+            setAiModel(defaultModel);
+          } else if (uniqueModels.length > 0) {
+            setAiModel(uniqueModels[0]);
+          }
+        }
+      } catch (error) {
+        console.warn("Failed to fetch available models:", error);
+        setAvailableModels([]);
+      } finally {
+        setLoadingModels(false);
+      }
+    };
+    fetchModels();
+  }, [aiProvider, defaultModel]);
+
+  // Auto-close progress dialog when grading completes
+  useEffect(() => {
+    if (progressStep === "completed" && progressOpen) {
+      // Close the dialog after a short delay to show completion state
+      const timer = setTimeout(() => {
+        closeProgress();
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [progressStep, progressOpen, closeProgress]);
 
   const handleFilesSelected = (newFiles: File[]) => {
     setFiles(newFiles.slice(0, 1)); // Only allow one file
@@ -104,6 +147,14 @@ export function BuildInstructionPage() {
 
   const handleRemoveFile = () => {
     setFiles([]);
+  };
+
+  const handleCancelClick = () => {
+    handleCancelGrading();
+    // Close the dialog after a short delay to allow the cancel to be processed
+    setTimeout(() => {
+      closeProgress();
+    }, 500);
   };
 
   const handleUnsupportedFiles = (rejected: FileRejection[], acceptedFormatsLabel: string) => {
@@ -140,72 +191,58 @@ export function BuildInstructionPage() {
       }
     }
 
-    const assignmentId = await startGradingProcess({
+    const sessionId = await startGradingProcess({
       file: files.length > 0 ? files[0] : undefined,
       studentId,
       studentName: finalStudentName || undefined,
       background: background || undefined,
       templateId: undefined,
       contentText: contentText || undefined,
+      instructions: instruction.trim(),
+      aiModel: aiModel || undefined,
+      isPreview: true,
     });
 
-    if (assignmentId) {
-      setHasGradedOnce(true);
-      // TODO: Fetch grading result and display in aiOutput
-      // For now, show a placeholder
-      setAiOutput("AI output will be displayed here after grading completes...");
+    if (sessionId) {
+      // Fetch the grading result from the preview endpoint
+      try {
+        const result = await assignmentsApi.getPreviewGradeResult(sessionId);
+        console.log("[BuildInstructionPage] Preview result received:", {
+          htmlLength: result.html?.length,
+          htmlFirst500: result.html?.substring(0, 500),
+          containsHtmlTags: result.html ? /<[a-z]/i.test(result.html) : false,
+          containsMarkdownMarkup: result.html ? /~~|{{/.test(result.html) : false,
+          containsRevisedEssay: result.html ? /revised\s+essay/i.test(result.html) : false,
+          containsDetailedCorrections: result.html ? /detailed\s+corrections/i.test(result.html) : false,
+          containsTeachersComments: result.html ? /teacher.*comments/i.test(result.html) : false,
+        });
+
+        if (result.html) {
+          setAiOutput(result.html);
+          showNotification({
+            type: "success",
+            message: "AI grading completed! See the result in the 'AI Graded Result' section.",
+          });
+        } else {
+          setAiOutput("Grading completed but no output was generated.");
+          showNotification({
+            type: "warning",
+            message: "Grading completed but no output was generated.",
+          });
+        }
+      } catch (error) {
+        console.error("[BuildInstructionPage] Failed to fetch preview grading result:", error);
+        setAiOutput("Unable to retrieve grading result. Please check the logs.");
+        showNotification({
+          type: "error",
+          message: "Failed to fetch grading result. Please try again.",
+        });
+      }
     } else if (progressError) {
       showNotification({
         type: "error",
         message: progressError,
       });
-    }
-  };
-
-  const handleSaveTemplate = async () => {
-    if (!templateName.trim()) {
-      showNotification({
-        type: "warning",
-        message: "Please enter a template name",
-      });
-      return;
-    }
-
-    if (!instruction.trim()) {
-      showNotification({
-        type: "warning",
-        message: "Please provide grading instruction to save",
-      });
-      return;
-    }
-
-    setIsSavingTemplate(true);
-    try {
-      await templatesApi.create({
-        name: templateName,
-        description: templateDesc,
-        instructions: instruction,
-        instruction_format: "text",
-        question_types: [],
-        encouragement_words: [],
-      });
-
-      showNotification({
-        type: "success",
-        message: "Instruction template saved successfully!",
-      });
-
-      // Reset form
-      setTemplateName("");
-      setTemplateDesc("");
-      navigate("/templates");
-    } catch (error) {
-      showNotification({
-        type: "error",
-        message: error instanceof Error ? error.message : "Failed to save template",
-      });
-    } finally {
-      setIsSavingTemplate(false);
     }
   };
 
@@ -245,18 +282,44 @@ export function BuildInstructionPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="mb-6 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" onClick={() => navigate("/templates")} title="Back">
             <ArrowLeft className="h-5 w-5" />
           </Button>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Build Instruction with AI</h1>
-            <p className="mt-1 text-sm text-gray-600">
-              Create grading instructions using AI assistance • Provider: {aiProvider} • Model: {aiModel}
-            </p>
+          <h1 className="text-2xl font-bold text-gray-900">Build Instruction with AI</h1>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <Label className="text-sm font-medium text-gray-700">Provider:</Label>
+            <span className="px-3 py-2 text-sm bg-gray-100 rounded-md border border-gray-200">{aiProvider}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Label htmlFor="ai-model" className="text-sm font-medium text-gray-700">
+              Model:
+            </Label>
+            <select
+              id="ai-model"
+              value={aiModel || ""}
+              onChange={(e) => setAiModel(e.target.value)}
+              disabled={loadingModels || availableModels.length === 0 || progressOpen}
+              className="px-3 py-2 text-sm rounded-md border border-gray-300 bg-white focus:outline-none focus:ring-1 focus:ring-primary disabled:bg-gray-100 disabled:text-gray-400"
+            >
+              {availableModels.length === 0 ? (
+                <option value="">{loadingModels ? "Loading models..." : "No models available"}</option>
+              ) : (
+                <>
+                  {!aiModel && <option value="">Select a model...</option>}
+                  {availableModels.map((model) => (
+                    <option key={model} value={model}>
+                      {model}
+                    </option>
+                  ))}
+                </>
+              )}
+            </select>
           </div>
         </div>
       </div>
@@ -475,17 +538,19 @@ export function BuildInstructionPage() {
           </Card>
 
           {/* AI Output Card */}
-          <Card className="flex flex-col flex-1 bg-white">
-            <CardHeader>
-              <CardTitle className="text-base">AI Graded Result</CardTitle>
+          <Card className="flex flex-col flex-1 bg-white border border-gray-200 shadow-sm">
+            <CardHeader className="border-b border-gray-200">
+              <CardTitle className="text-base font-semibold text-gray-900">📋 AI Graded Result</CardTitle>
             </CardHeader>
-            <CardContent className="flex-1 flex flex-col space-y-3">
+            <CardContent className="flex-1 flex flex-col overflow-hidden p-0">
               {aiOutput ? (
-                <div className="prose prose-sm max-w-none overflow-y-auto flex-1">
-                  <div className="text-sm text-gray-700 space-y-2" dangerouslySetInnerHTML={{ __html: aiOutput }} />
+                <div className="flex-1 overflow-y-auto p-4 bg-gray-50">
+                  <GradedOutputDisplay html={aiOutput} className="text-sm" />
                 </div>
               ) : (
-                <p className="text-sm text-gray-500">Complete grading to see AI feedback here.</p>
+                <div className="flex-1 flex items-center justify-center p-4">
+                  <p className="text-sm text-gray-500 text-center">Click "Grade with AI & Review Result" to see AI feedback here.</p>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -500,7 +565,7 @@ export function BuildInstructionPage() {
         phaseElapsedMs={phaseElapsedMs}
         totalElapsedMs={totalElapsedMs}
         phaseTimes={phaseTimes}
-        onCancel={handleCancelGrading}
+        onCancel={handleCancelClick}
         onClose={closeProgress}
       />
 

@@ -4,7 +4,7 @@ Pydantic schemas for Assignment API.
 
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 
 from pydantic import BaseModel, Field
 
@@ -120,7 +120,7 @@ class GradePhaseResponse(BaseModel):
     """Response for each phase of the grading flow."""
 
     phase: str  # "upload", "analyze_context", "grading"
-    assignment_id: Optional[int] = None
+    assignment_id: Optional[Union[int, str]] = None  # int for persistent grading, str (UUID) for preview
     context_id: Optional[int] = None
     ai_grading_id: Optional[int] = None
     status: Optional[str] = None

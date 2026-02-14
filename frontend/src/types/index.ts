@@ -116,10 +116,10 @@ export type GradingTemplate = Template;
 
 // AI Config
 export interface AIConfig {
-  provider: string;
-  model: string;
+  default_provider: string;
+  default_model: string;
   api_key: string;
-  base_url?: string;
+  api_base_url?: string;
   temperature: number;
   max_tokens: number;
   search_engine: string;

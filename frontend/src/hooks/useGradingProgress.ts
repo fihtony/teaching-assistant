@@ -23,6 +23,9 @@ export interface GradingProgressConfig {
   templateId?: string | number;
   contentText?: string;
   assignmentId?: string | number;
+  instructions?: string; // Custom grading instructions (for preview mode like BuildInstructionPage)
+  aiModel?: string; // AI model to use for grading (overrides default from settings)
+  isPreview?: boolean; // Use preview endpoints (non-persistent grading)
 }
 
 export interface UseGradingProgressReturn {
@@ -94,16 +97,28 @@ export function useGradingProgress(): UseGradingProgressReturn {
       // Step 1: Upload (if file provided) or use existing assignment
       if (config.file) {
         setProgressStep("uploading");
-        const uploadRes = await assignmentsApi.gradeUploadPhase(
-          {
-            file: config.file,
-            student_id: config.studentId || undefined,
-            student_name: config.studentName || undefined,
-            background: config.background || undefined,
-            template_id: config.templateId ? Number(config.templateId) : undefined,
-          },
-          signal,
-        );
+        const uploadRes = config.isPreview
+          ? await assignmentsApi.previewGradeUploadPhase(
+              {
+                file: config.file,
+                student_id: config.studentId || undefined,
+                student_name: config.studentName || undefined,
+                background: config.background || undefined,
+                instructions: config.instructions || undefined,
+                ai_model: config.aiModel || undefined,
+              },
+              signal,
+            )
+          : await assignmentsApi.gradeUploadPhase(
+              {
+                file: config.file,
+                student_id: config.studentId || undefined,
+                student_name: config.studentName || undefined,
+                background: config.background || undefined,
+                template_id: config.templateId ? Number(config.templateId) : undefined,
+              },
+              signal,
+            );
 
         if (cancelledRef.current) return null;
 
@@ -124,12 +139,18 @@ export function useGradingProgress(): UseGradingProgressReturn {
         assignmentId = config.assignmentId!;
       }
 
-      // Ensure assignmentId is a number for API calls
-      const assignmentIdNum = typeof assignmentId === "string" ? parseInt(assignmentId, 10) : assignmentId;
+      // Ensure assignmentId is a string for preview API calls (session ID), or number for regular API
+      const assignmentIdForNextPhase = config.isPreview
+        ? String(assignmentId)
+        : typeof assignmentId === "string"
+          ? parseInt(assignmentId, 10)
+          : assignmentId;
 
       // Step 2: Analyze context
       setProgressStep("extracting");
-      const analyzeRes = await assignmentsApi.analyzeContextPhase(assignmentIdNum, signal);
+      const analyzeRes = config.isPreview
+        ? await assignmentsApi.previewAnalyzeContextPhase(String(assignmentIdForNextPhase), signal)
+        : await assignmentsApi.analyzeContextPhase(assignmentIdForNextPhase as number, signal);
 
       if (cancelledRef.current) return null;
 
@@ -146,7 +167,9 @@ export function useGradingProgress(): UseGradingProgressReturn {
 
       // Step 3: Run grading
       setProgressStep("grading");
-      const runRes = await assignmentsApi.runGradingPhase(assignmentIdNum, signal);
+      const runRes = config.isPreview
+        ? await assignmentsApi.previewRunGradingPhase(String(assignmentIdForNextPhase), signal)
+        : await assignmentsApi.runGradingPhase(assignmentIdForNextPhase as number, signal);
 
       if (cancelledRef.current) return null;
 
@@ -167,11 +190,11 @@ export function useGradingProgress(): UseGradingProgressReturn {
 
       if (cancelledRef.current) return null;
 
-      // Save the total elapsed time to backend
-      if (startTimeRef.current) {
+      // Save the total elapsed time to backend (only for persistent grading)
+      if (!config.isPreview && startTimeRef.current) {
         const finalTotalMs = Date.now() - startTimeRef.current;
         try {
-          await assignmentsApi.updateGradingTime(assignmentIdNum, finalTotalMs);
+          await assignmentsApi.updateGradingTime(assignmentIdForNextPhase as number, finalTotalMs);
         } catch (err) {
           // Log but don't fail if we can't save the time
           console.warn("Failed to save grading time:", err);

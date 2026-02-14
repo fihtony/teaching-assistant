@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Download, FileText, CheckCircle, AlertTriangle, Star, Sparkles, Clock, XCircle } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
+import { GradedOutputDisplay } from "@/components/common/GradedOutputDisplay";
 
 interface GradingItem {
   question_number: number;
@@ -353,7 +354,7 @@ export function GradingResultPage() {
           <CardContent className="flex-1 min-h-0">
             <div className="rounded-lg border bg-gray-50 p-4 h-full overflow-auto max-h-[70vh]">
               {assignment.graded_content ? (
-                <div className="graded-output prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: assignment.graded_content }} />
+                <GradedOutputDisplay html={assignment.graded_content} />
               ) : assignment.grading_results ? (
                 <GradingResultsView results={assignment.grading_results as GradingResults} />
               ) : assignment.graded_at ? (

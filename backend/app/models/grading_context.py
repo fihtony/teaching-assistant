@@ -39,6 +39,8 @@ class GradingContext(Base):
     cached_article_ids = Column(JSON, nullable=True)
     # AI understanding summary (text, line by line)
     ai_understanding = Column(Text, nullable=True)
+    # Output format requirements extracted from teacher's instructions
+    output_requirements = Column(Text, nullable=True)
 
     # Timestamps with timezone
     created_at = Column(String, default=lambda: get_now_with_timezone().isoformat())

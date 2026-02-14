@@ -145,6 +145,49 @@ export const assignmentsApi = {
       total_time_ms: totalTimeMs,
     });
   },
+
+  // 3-phase preview grading flow (non-persistent, for instruction building)
+  previewGradeUploadPhase: async (
+    form: {
+      file: File;
+      student_id?: number;
+      student_name?: string;
+      background?: string;
+      instructions?: string;
+      ai_model?: string;
+      ai_provider?: string;
+    },
+    signal?: AbortSignal,
+  ): Promise<GradePhaseResponse> => {
+    const formData = new FormData();
+    formData.append("file", form.file);
+    if (form.student_id != null) formData.append("student_id", String(form.student_id));
+    if (form.student_name) formData.append("student_name", form.student_name);
+    if (form.background) formData.append("background", form.background);
+    if (form.instructions) formData.append("instructions", form.instructions);
+    if (form.ai_model) formData.append("ai_model", form.ai_model);
+    if (form.ai_provider) formData.append("ai_provider", form.ai_provider);
+    const response = await api.post("/assignments/preview-grade/upload", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+      signal,
+    });
+    return response.data;
+  },
+
+  previewAnalyzeContextPhase: async (sessionId: string, signal?: AbortSignal): Promise<GradePhaseResponse> => {
+    const response = await api.post(`/assignments/preview-grade/${sessionId}/analyze-context`, undefined, { signal });
+    return response.data;
+  },
+
+  previewRunGradingPhase: async (sessionId: string, signal?: AbortSignal): Promise<GradePhaseResponse> => {
+    const response = await api.post(`/assignments/preview-grade/${sessionId}/run`, undefined, { signal });
+    return response.data;
+  },
+
+  getPreviewGradeResult: async (sessionId: string): Promise<{ html: string }> => {
+    const response = await api.get(`/assignments/preview-grade/${sessionId}/result`);
+    return response.data;
+  },
 };
 
 // Templates API

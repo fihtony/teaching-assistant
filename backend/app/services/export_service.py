@@ -330,14 +330,16 @@ class ExportService:
             from xhtml2pdf import pisa
         except ImportError:
             logger.warning("xhtml2pdf not installed; cannot export HTML as PDF")
-            raise ValueError("PDF export from HTML requires xhtml2pdf. Install with: pip install xhtml2pdf")
+            raise ValueError(
+                "PDF export from HTML requires xhtml2pdf. Install with: pip install xhtml2pdf"
+            )
 
         # Wrap in full document; use only simple CSS (xhtml2pdf does not support attribute selectors)
         doc = f"""<!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head><meta charset="utf-8"/><style>
-del {{ text-decoration: line-through; color: #b91c1c; }}
-.correction {{ color: #b91c1c; }}
+del {{ text-decoration: line-through; color: #dc2626; }}
+.correction {{ color: #dc2626; }}
 h2, h3 {{ font-weight: bold; margin-top: 1em; }}
 </style></head>
 <body>{html_content}</body>

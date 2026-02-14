@@ -3,6 +3,7 @@ Assignment API routes.
 """
 
 import time
+import uuid
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict
 import json
@@ -12,7 +13,10 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc
 
-from app.core.ai_config import get_ai_provider_and_model, normalize_grading_model_display
+from app.core.ai_config import (
+    get_ai_provider_and_model,
+    normalize_grading_model_display,
+)
 from app.core.database import get_db
 from app.core.logging import get_logger
 from app.core.datetime_utils import get_now_with_timezone, from_iso_datetime
@@ -51,6 +55,10 @@ logger = get_logger()
 router = APIRouter(prefix="/assignments", tags=["Assignments"])
 
 
+# In-memory storage for preview grading sessions (non-persistent)
+_preview_sessions: Dict[str, Dict] = {}
+
+
 def ensure_default_teacher(db: Session) -> Teacher:
     """Ensure the default teacher exists."""
     teacher = db.query(Teacher).filter(Teacher.id == DEFAULT_TEACHER_ID).first()
@@ -70,7 +78,9 @@ def _first_line(text: Optional[str], max_len: int = 500) -> Optional[str]:
     return (line[:max_len] + "…") if len(line) > max_len else line
 
 
-def _display_status_and_date(assignment: Assignment, latest_ag: Optional[AIGrading]) -> tuple[str, str]:
+def _display_status_and_date(
+    assignment: Assignment, latest_ag: Optional[AIGrading]
+) -> tuple[str, str]:
     """
     Compute display_status and display_date per business rules.
     Returns (display_status, display_date ISO 8601 datetime string).
@@ -90,7 +100,9 @@ def _display_status_and_date(assignment: Assignment, latest_ag: Optional[AIGradi
     return (status_label, date_str)
 
 
-def _template_display(context: Optional[GradingContext], template: Optional[GradingTemplate]) -> str:
+def _template_display(
+    context: Optional[GradingContext], template: Optional[GradingTemplate]
+) -> str:
     """Template display: template name, 'Custom Instruction', or 'name + Custom'."""
     has_template = template and template.name
     has_custom = context and (context.instructions or "").strip()
@@ -184,7 +196,11 @@ async def grade_upload_phase(
     file_processor = get_file_processor()
     if not file_processor.is_supported_format(file.filename):
         elapsed = int((time.perf_counter() - start_ms) * 1000)
-        return GradePhaseResponse(phase="upload", error=f"Unsupported format: {file.filename}", elapsed_ms=elapsed)
+        return GradePhaseResponse(
+            phase="upload",
+            error=f"Unsupported format: {file.filename}",
+            elapsed_ms=elapsed,
+        )
     try:
         content = await file.read()
         stored_filename, file_path, source_format = await file_processor.save_upload(
@@ -234,7 +250,9 @@ async def grade_upload_phase(
         return GradePhaseResponse(phase="upload", error=str(e), elapsed_ms=elapsed)
 
 
-@router.post("/{assignment_id}/grade/analyze-context", response_model=GradePhaseResponse)
+@router.post(
+    "/{assignment_id}/grade/analyze-context", response_model=GradePhaseResponse
+)
 async def grade_analyze_context_phase(
     assignment_id: int,
     db: Session = Depends(get_db),
@@ -243,19 +261,39 @@ async def grade_analyze_context_phase(
     Phase 2: Fetch student info, create ai_grading (not_started), run context prompt (steps e-g).
     """
     start_ms = time.perf_counter()
-    assignment = db.query(Assignment).options(joinedload(Assignment.student)).filter(Assignment.id == assignment_id).first()
+    assignment = (
+        db.query(Assignment)
+        .options(joinedload(Assignment.student))
+        .filter(Assignment.id == assignment_id)
+        .first()
+    )
     if not assignment:
         elapsed = int((time.perf_counter() - start_ms) * 1000)
-        return GradePhaseResponse(phase="analyze_context", error="Assignment not found", elapsed_ms=elapsed)
-    context = db.query(GradingContext).filter(GradingContext.assignment_id == assignment_id).order_by(desc(GradingContext.id)).first()
+        return GradePhaseResponse(
+            phase="analyze_context", error="Assignment not found", elapsed_ms=elapsed
+        )
+    context = (
+        db.query(GradingContext)
+        .filter(GradingContext.assignment_id == assignment_id)
+        .order_by(desc(GradingContext.id))
+        .first()
+    )
     if not context:
         elapsed = int((time.perf_counter() - start_ms) * 1000)
-        return GradePhaseResponse(phase="analyze_context", error="Grading context not found", elapsed_ms=elapsed)
+        return GradePhaseResponse(
+            phase="analyze_context",
+            error="Grading context not found",
+            elapsed_ms=elapsed,
+        )
     try:
         teacher = ensure_default_teacher(db)
         template_instruction = ""
         if context.template_id:
-            t = db.query(GradingTemplate).filter(GradingTemplate.id == context.template_id).first()
+            t = (
+                db.query(GradingTemplate)
+                .filter(GradingTemplate.id == context.template_id)
+                .first()
+            )
             if t and (t.instructions or "").strip():
                 template_instruction = t.instructions
         custom_instruction = (context.instructions or "").strip()
@@ -301,7 +339,9 @@ async def grade_analyze_context_phase(
     except Exception as e:
         logger.exception("Analyze context phase failed")
         elapsed = int((time.perf_counter() - start_ms) * 1000)
-        return GradePhaseResponse(phase="analyze_context", error=str(e), elapsed_ms=elapsed)
+        return GradePhaseResponse(
+            phase="analyze_context", error=str(e), elapsed_ms=elapsed
+        )
 
 
 @router.post("/{assignment_id}/grade/run", response_model=GradePhaseResponse)
@@ -313,10 +353,17 @@ async def grade_run_phase(
     Phase 3: Set ai_grading status=grading, run grading prompt, save results (steps h-i).
     """
     start_ms = time.perf_counter()
-    assignment = db.query(Assignment).options(joinedload(Assignment.student)).filter(Assignment.id == assignment_id).first()
+    assignment = (
+        db.query(Assignment)
+        .options(joinedload(Assignment.student))
+        .filter(Assignment.id == assignment_id)
+        .first()
+    )
     if not assignment:
         elapsed = int((time.perf_counter() - start_ms) * 1000)
-        return GradePhaseResponse(phase="grading", error="Assignment not found", elapsed_ms=elapsed)
+        return GradePhaseResponse(
+            phase="grading", error="Assignment not found", elapsed_ms=elapsed
+        )
     ai_rec = (
         db.query(AIGrading)
         .options(joinedload(AIGrading.context))
@@ -326,7 +373,9 @@ async def grade_run_phase(
     )
     if not ai_rec or not ai_rec.context:
         elapsed = int((time.perf_counter() - start_ms) * 1000)
-        return GradePhaseResponse(phase="grading", error="AI grading or context not found", elapsed_ms=elapsed)
+        return GradePhaseResponse(
+            phase="grading", error="AI grading or context not found", elapsed_ms=elapsed
+        )
     try:
         provider, model = get_ai_provider_and_model(db)
         ai_rec.grading_model = normalize_grading_model_display(provider, model)
@@ -338,13 +387,40 @@ async def grade_run_phase(
         # Pass empty string when no name so prompt uses "Dear," not "Dear Student"
         grading_service = get_ai_grading_service(db)
         grade_start = time.perf_counter()
-        html = await grading_service.run_grading_prompt_phase(
+        # AI now returns markdown with special markup for corrections
+        markdown_grading = await grading_service.run_grading_prompt_phase(
             assignment=assignment,
             context=ai_rec.context,
             student_name=student_name,
         )
+
+        # Convert markdown to HTML for storage and display
+        from app.services.markdown_converter import MarkdownGradingConverter
+
+        html_content = MarkdownGradingConverter.markdown_to_html(
+            markdown_grading, include_styling=True
+        )
+
+        # Debug logging for HTML result
+        logger.debug(
+            f"[GRADE RUN PHASE] Markdown output length: {len(markdown_grading)}"
+        )
+        logger.debug(f"[GRADE RUN PHASE] Markdown: {markdown_grading}")
+        logger.debug(f"[GRADE RUN PHASE] HTML output length: {len(html_content)}")
+        logger.debug(f"[GRADE RUN PHASE] HTML: {html_content}")
+        logger.debug(f"[GRADE RUN PHASE] HTML contains <h: {'<h' in html_content}")
+        logger.debug(f"[GRADE RUN PHASE] HTML contains <p: {'<p' in html_content}")
+        logger.debug(
+            f"[GRADE RUN PHASE] HTML contains <span: {'<span' in html_content}"
+        )
+        logger.debug(
+            f"[GRADE RUN PHASE] HTML == Markdown: {html_content == markdown_grading}"
+        )
+
         grading_time_seconds = int(round(time.perf_counter() - grade_start))
-        result = GradingResult(items=[], section_scores={}, overall_comment=None, html_content=html)
+        result = GradingResult(
+            items=[], section_scores={}, overall_comment=None, html_content=html_content
+        )
         ai_rec.results = json.dumps(result.model_dump(), ensure_ascii=False)
         ai_rec.graded_at = get_now_with_timezone().isoformat()
         ai_rec.grading_time = grading_time_seconds
@@ -399,7 +475,9 @@ async def get_assignment_history(
             .all()
         )
         if not assignments:
-            return AssignmentListResponse(items=[], total=0, page=page, page_size=page_size, status_options=[])
+            return AssignmentListResponse(
+                items=[], total=0, page=page, page_size=page_size, status_options=[]
+            )
 
         aid_list = [a.id for a in assignments]
         latest_ag_list = (
@@ -429,36 +507,61 @@ async def get_assignment_history(
             display_status, display_date = _display_status_and_date(a, latest)
             graded_at = latest.graded_at if latest else None
             grading_model = latest.grading_model if latest else None
-            latest_grading_status = AIGradingStatusEnum(latest.status.value) if latest and latest.status else None
-            essay_topic = (ctx.title or _first_line(a.extracted_text, 120)) if ctx else _first_line(a.extracted_text, 120)
+            latest_grading_status = (
+                AIGradingStatusEnum(latest.status.value)
+                if latest and latest.status
+                else None
+            )
+            essay_topic = (
+                (ctx.title or _first_line(a.extracted_text, 120))
+                if ctx
+                else _first_line(a.extracted_text, 120)
+            )
 
             search_lower = (search or "").strip().lower()
-            if search_lower and search_lower not in (title or "").lower() and search_lower not in (student_name or "").lower():
+            if (
+                search_lower
+                and search_lower not in (title or "").lower()
+                and search_lower not in (student_name or "").lower()
+            ):
                 continue
-            if status and status.strip() and display_status.lower() != status.strip().lower():
+            if (
+                status
+                and status.strip()
+                and display_status.lower() != status.strip().lower()
+            ):
                 continue
 
-            rows.append({
-                "assignment": a,
-                "student_name": student_name or None,
-                "title": title,
-                "template_display": template_display,
-                "display_status": display_status,
-                "display_date": display_date,
-                "latest": latest,
-                "graded_at": graded_at,
-                "grading_model": grading_model,
-                "latest_grading_status": latest_grading_status,
-                "essay_topic": essay_topic,
-            })
+            rows.append(
+                {
+                    "assignment": a,
+                    "student_name": student_name or None,
+                    "title": title,
+                    "template_display": template_display,
+                    "display_status": display_status,
+                    "display_date": display_date,
+                    "latest": latest,
+                    "graded_at": graded_at,
+                    "grading_model": grading_model,
+                    "latest_grading_status": latest_grading_status,
+                    "essay_topic": essay_topic,
+                }
+            )
 
         status_options = sorted(set(r["display_status"] for r in rows))
         if sort_by == "student_name":
-            rows.sort(key=lambda r: (r["student_name"] or "").lower(), reverse=(sort_order == "desc"))
+            rows.sort(
+                key=lambda r: (r["student_name"] or "").lower(),
+                reverse=(sort_order == "desc"),
+            )
         elif sort_by == "title":
-            rows.sort(key=lambda r: (r["title"] or "").lower(), reverse=(sort_order == "desc"))
+            rows.sort(
+                key=lambda r: (r["title"] or "").lower(), reverse=(sort_order == "desc")
+            )
         else:
-            rows.sort(key=lambda r: r["display_date"] or "", reverse=(sort_order == "desc"))
+            rows.sort(
+                key=lambda r: r["display_date"] or "", reverse=(sort_order == "desc")
+            )
 
         total = len(rows)
         start = (page - 1) * page_size
@@ -495,7 +598,9 @@ async def get_assignment_history(
         )
     except Exception as e:
         logger.exception("Error fetching assignment history")
-        raise HTTPException(status_code=500, detail=f"Error fetching assignments: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error fetching assignments: {str(e)}"
+        )
 
 
 @router.get("/{assignment_id}", response_model=AssignmentDetail)
@@ -519,9 +624,7 @@ async def get_assignment(
 
     latest = (
         db.query(AIGrading)
-        .options(
-            joinedload(AIGrading.context).joinedload(GradingContext.template)
-        )
+        .options(joinedload(AIGrading.context).joinedload(GradingContext.template))
         .filter(AIGrading.assignment_id == assignment.id)
         .order_by(desc(AIGrading.created_at))
         .first()
@@ -552,7 +655,11 @@ async def get_assignment(
                 template_name = latest.context.template.name
         if latest.results:
             try:
-                data = json.loads(latest.results) if isinstance(latest.results, str) else latest.results
+                data = (
+                    json.loads(latest.results)
+                    if isinstance(latest.results, str)
+                    else latest.results
+                )
                 grading_results = GradingResult(**data)
                 graded_content = grading_results.html_content
             except Exception:
@@ -594,15 +701,24 @@ async def export_assignment(
 
     latest = (
         db.query(AIGrading)
-        .filter(AIGrading.assignment_id == assignment.id, AIGrading.status == AIGradingStatus.COMPLETED)
+        .filter(
+            AIGrading.assignment_id == assignment.id,
+            AIGrading.status == AIGradingStatus.COMPLETED,
+        )
         .order_by(desc(AIGrading.created_at))
         .first()
     )
     if not latest or not latest.results:
-        raise HTTPException(status_code=400, detail="No completed grading result to export")
+        raise HTTPException(
+            status_code=400, detail="No completed grading result to export"
+        )
 
     try:
-        data = json.loads(latest.results) if isinstance(latest.results, str) else latest.results
+        data = (
+            json.loads(latest.results)
+            if isinstance(latest.results, str)
+            else latest.results
+        )
         grading_result = GradingResult(**data)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid grading result: {e}")
@@ -630,52 +746,70 @@ async def export_assignment(
 async def get_dashboard_stats(db: Session = Depends(get_db)):
     """Get dashboard statistics: total_graded, pending, this_week, needs_review."""
     now = get_now_with_timezone()
-    
+
     # Total Graded: count ai_grading records with status=completed
-    total_graded = db.query(AIGrading).filter(
-        AIGrading.status == AIGradingStatus.COMPLETED
-    ).count()
-    
-    # Pending: 
+    total_graded = (
+        db.query(AIGrading)
+        .filter(AIGrading.status == AIGradingStatus.COMPLETED)
+        .count()
+    )
+
+    # Pending:
     # a. ai_grading with status=not_started
     # b. assignments not in failure status and not referred in ai_grading
-    pending_not_started = db.query(AIGrading).filter(
-        AIGrading.status == AIGradingStatus.NOT_STARTED
-    ).count()
-    
-    pending_no_grading = db.query(Assignment).filter(
-        ~Assignment.status.in_([AssignmentStatus.UPLOAD_FAILED, AssignmentStatus.EXTRACT_FAILED]),
-        ~Assignment.id.in_(
-            db.query(AIGrading.assignment_id).distinct()
+    pending_not_started = (
+        db.query(AIGrading)
+        .filter(AIGrading.status == AIGradingStatus.NOT_STARTED)
+        .count()
+    )
+
+    pending_no_grading = (
+        db.query(Assignment)
+        .filter(
+            ~Assignment.status.in_(
+                [AssignmentStatus.UPLOAD_FAILED, AssignmentStatus.EXTRACT_FAILED]
+            ),
+            ~Assignment.id.in_(db.query(AIGrading.assignment_id).distinct()),
         )
-    ).count()
-    
+        .count()
+    )
+
     pending = pending_not_started + pending_no_grading
-    
+
     # This Week: completed ai_grading records within this week (Sunday local time)
     # Calculate the start of this week (Sunday)
     days_since_sunday = (now.weekday() + 1) % 7  # Monday=0, Sunday=6 -> Sunday=0
     week_start = now - timedelta(days=days_since_sunday)
     week_start = week_start.replace(hour=0, minute=0, second=0, microsecond=0)
-    
-    this_week = db.query(AIGrading).filter(
-        AIGrading.status == AIGradingStatus.COMPLETED,
-        AIGrading.updated_at >= week_start
-    ).count()
-    
+
+    this_week = (
+        db.query(AIGrading)
+        .filter(
+            AIGrading.status == AIGradingStatus.COMPLETED,
+            AIGrading.updated_at >= week_start,
+        )
+        .count()
+    )
+
     # Needs Review:
     # a. ai_grading with status=failed
     # b. assignments with failure status
-    needs_review_grading = db.query(AIGrading).filter(
-        AIGrading.status == AIGradingStatus.FAILED
-    ).count()
-    
-    needs_review_assignment = db.query(Assignment).filter(
-        Assignment.status.in_([AssignmentStatus.UPLOAD_FAILED, AssignmentStatus.EXTRACT_FAILED])
-    ).count()
-    
+    needs_review_grading = (
+        db.query(AIGrading).filter(AIGrading.status == AIGradingStatus.FAILED).count()
+    )
+
+    needs_review_assignment = (
+        db.query(Assignment)
+        .filter(
+            Assignment.status.in_(
+                [AssignmentStatus.UPLOAD_FAILED, AssignmentStatus.EXTRACT_FAILED]
+            )
+        )
+        .count()
+    )
+
     needs_review = needs_review_grading + needs_review_assignment
-    
+
     return {
         "total_graded": total_graded,
         "pending": pending,
@@ -692,14 +826,14 @@ async def update_grading_time(
 ):
     """
     Update the total grading time (from all phases) for an assignment.
-    
+
     Expects JSON body with 'total_time_ms' (milliseconds).
     Converts to seconds and saves to the AIGrading record's grading_time field.
     """
     total_time_ms = body.get("total_time_ms")
     if total_time_ms is None:
         raise HTTPException(status_code=400, detail="total_time_ms is required")
-    
+
     # Get the latest AIGrading record for this assignment
     ai_rec = (
         db.query(AIGrading)
@@ -707,16 +841,304 @@ async def update_grading_time(
         .order_by(desc(AIGrading.created_at))
         .first()
     )
-    
+
     if not ai_rec:
         raise HTTPException(status_code=404, detail="AI grading record not found")
-    
+
     # Convert milliseconds to seconds and save
     grading_time_seconds = int(round(total_time_ms / 1000))
     ai_rec.grading_time = grading_time_seconds
     db.commit()
-    
-    return {"message": "Grading time updated", "grading_time_seconds": grading_time_seconds}
+
+    return {
+        "message": "Grading time updated",
+        "grading_time_seconds": grading_time_seconds,
+    }
+
+
+@router.post("/preview-grade/upload", response_model=GradePhaseResponse)
+async def preview_grade_upload_phase(
+    file: UploadFile = File(...),
+    student_id: Optional[int] = Form(None),
+    student_name: Optional[str] = Form(None),
+    background: Optional[str] = Form(None),
+    instructions: Optional[str] = Form(None),
+    ai_model: Optional[str] = Form(None),
+    ai_provider: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    """
+    Preview Grade Phase 1: Process file without saving to database.
+    Returns session_id for subsequent preview grade phases.
+    """
+    start_ms = time.perf_counter()
+    file_processor = get_file_processor()
+
+    if not file_processor.is_supported_format(file.filename):
+        elapsed = int((time.perf_counter() - start_ms) * 1000)
+        return GradePhaseResponse(
+            phase="upload",
+            error=f"Unsupported format: {file.filename}",
+            elapsed_ms=elapsed,
+        )
+
+    try:
+        session_id = str(uuid.uuid4())
+        content = await file.read()
+        stored_filename, file_path, source_format = await file_processor.save_upload(
+            file_content=content, original_filename=file.filename
+        )
+
+        ocr_service = get_ocr_service(db)
+        extracted_text = await ocr_service.extract_text(file_path, source_format)
+
+        # Store session data in memory
+        _preview_sessions[session_id] = {
+            "student_id": student_id,
+            "student_name": student_name,
+            "background": (background or "").strip() or None,
+            "instructions": (instructions or "").strip() or None,
+            "ai_model": ai_model or None,  # Store the selected model
+            "ai_provider": ai_provider or None,  # Store the selected provider
+            "extracted_text": extracted_text,
+            "stored_filename": stored_filename,
+            "title": _first_line(extracted_text),
+        }
+
+        elapsed = int((time.perf_counter() - start_ms) * 1000)
+        return GradePhaseResponse(
+            phase="upload",
+            assignment_id=session_id,
+            status="extracted",
+            elapsed_ms=elapsed,
+        )
+    except Exception as e:
+        logger.exception("Preview grade upload phase failed")
+        elapsed = int((time.perf_counter() - start_ms) * 1000)
+        return GradePhaseResponse(phase="upload", error=str(e), elapsed_ms=elapsed)
+
+
+@router.post(
+    "/preview-grade/{session_id}/analyze-context", response_model=GradePhaseResponse
+)
+async def preview_grade_analyze_context_phase(
+    session_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Preview Grade Phase 2: Analyze context without saving to database.
+    """
+    start_ms = time.perf_counter()
+
+    if session_id not in _preview_sessions:
+        elapsed = int((time.perf_counter() - start_ms) * 1000)
+        return GradePhaseResponse(
+            phase="analyze_context", error="Session not found", elapsed_ms=elapsed
+        )
+
+    try:
+        session = _preview_sessions[session_id]
+
+        # Build student info
+        student_info = "Not provided."
+        if session.get("student_id"):
+            student = (
+                db.query(Student).filter(Student.id == session["student_id"]).first()
+            )
+            if student:
+                parts = [f"Name: {student.name}"]
+                if student.grade:
+                    parts.append(f"Grade: {student.grade}")
+                if student.vocabulary:
+                    parts.append(f"Vocabulary: {student.vocabulary}")
+                if student.additional_info:
+                    parts.append(f"Additional info: {student.additional_info}")
+                student_info = "\n".join(parts)
+        elif session.get("student_name"):
+            student_info = f"Name: {session['student_name']} (temporary, no profile)"
+
+        # Run context prompt without saving
+        grading_service = get_ai_grading_service(
+            db,
+            ai_model_override=session.get("ai_model"),
+            ai_provider_override=session.get("ai_provider"),
+        )
+
+        # Use run_context_prompt_phase to generate final_grading_instruction (same as regular grading)
+        # Create minimal context object
+        class MinimalGradingContext:
+            def __init__(self):
+                self.background = session.get("background") or "Not provided."
+                self.ai_understanding = ""
+                self.extracted_references = None
+                self.cached_article_ids = None
+
+        context = MinimalGradingContext()
+        context_result = await grading_service.run_context_prompt_phase(
+            assignment=None,  # Not used in run_context_prompt_phase
+            context=context,
+            template_instruction="",  # No template instruction in preview mode
+            custom_instruction=session.get("instructions") or "None.",
+            student_info=student_info,
+        )
+
+        # Store context result in session
+        session["context_result"] = context_result
+        session["student_info"] = student_info
+
+        elapsed = int((time.perf_counter() - start_ms) * 1000)
+        return GradePhaseResponse(
+            phase="analyze_context",
+            assignment_id=session_id,
+            status="not_started",
+            elapsed_ms=elapsed,
+        )
+    except Exception as e:
+        logger.exception("Preview grade analyze context phase failed")
+        elapsed = int((time.perf_counter() - start_ms) * 1000)
+        return GradePhaseResponse(
+            phase="analyze_context", error=str(e), elapsed_ms=elapsed
+        )
+
+
+@router.post("/preview-grade/{session_id}/run", response_model=GradePhaseResponse)
+async def preview_grade_run_phase(
+    session_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Preview Grade Phase 3: Run grading without saving to database.
+    Returns HTML grading result.
+    """
+    start_ms = time.perf_counter()
+
+    if session_id not in _preview_sessions:
+        elapsed = int((time.perf_counter() - start_ms) * 1000)
+        return GradePhaseResponse(
+            phase="grading", error="Session not found", elapsed_ms=elapsed
+        )
+
+    try:
+        session = _preview_sessions[session_id]
+
+        if "context_result" not in session:
+            elapsed = int((time.perf_counter() - start_ms) * 1000)
+            return GradePhaseResponse(
+                phase="grading", error="Context not analyzed yet", elapsed_ms=elapsed
+            )
+
+        # Get stored session data
+        student_name = (session.get("student_name") or "").strip()
+        extracted_text = session.get("extracted_text", "")
+        title = session.get("title") or "(No title provided)"
+        context_result = session.get("context_result", {})
+        final_grading_instruction = context_result.get(
+            "final_grading_instruction",
+            "Grade the assignment with constructive feedback.",
+        )
+        output_requirements = context_result.get("output_requirements", "")
+
+        # Run grading prompt
+        grading_service = get_ai_grading_service(
+            db,
+            ai_model_override=session.get("ai_model"),
+            ai_provider_override=session.get("ai_provider"),
+        )
+
+        # Create a minimal context-like object for the grading service
+        class MinimalContext:
+            def __init__(self, title, instruction, output_reqs):
+                self.title = title
+                self.ai_understanding = instruction
+                self.output_requirements = output_reqs
+
+        class MinimalAssignment:
+            def __init__(self, text, name):
+                self.extracted_text = text
+                self.student_name = name
+
+        context = MinimalContext(title, final_grading_instruction, output_requirements)
+        assignment = MinimalAssignment(extracted_text, student_name)
+
+        # AI now returns markdown with special markup for corrections
+        markdown_grading = await grading_service.run_grading_prompt_phase(
+            assignment=assignment,
+            context=context,
+            student_name=student_name,
+        )
+
+        # Debug logging
+        logger.debug(
+            f"[PREVIEW GRADING] Markdown output length: {len(markdown_grading)}"
+        )
+        logger.debug(f"[PREVIEW GRADING] Markdown: {markdown_grading}")
+        logger.debug(f"[PREVIEW GRADING] Contains ~~: {'~~' in markdown_grading}")
+        logger.debug(
+            f"[PREVIEW GRADING] Contains {{}}: {'{' in markdown_grading and '}' in markdown_grading}"
+        )
+
+        # Convert markdown to HTML for storage and display
+        from app.services.markdown_converter import MarkdownGradingConverter
+
+        html_content = MarkdownGradingConverter.markdown_to_html(
+            markdown_grading, include_styling=True
+        )
+
+        # Debug logging for HTML result
+        logger.debug(f"[PREVIEW GRADING] HTML output length: {len(html_content)}")
+        logger.debug(f"[PREVIEW GRADING] HTML: {html_content}")
+        logger.debug(f"[PREVIEW GRADING] HTML contains <h: {'<h' in html_content}")
+        logger.debug(f"[PREVIEW GRADING] HTML contains <p: {'<p' in html_content}")
+        logger.debug(
+            f"[PREVIEW GRADING] HTML contains <span: {'<span' in html_content}"
+        )
+        logger.debug(
+            f"[PREVIEW GRADING] HTML == Markdown: {html_content == markdown_grading}"
+        )
+
+        # Store result and prepare for cleanup
+        session["html_result"] = html_content
+
+        elapsed = int((time.perf_counter() - start_ms) * 1000)
+
+        # Clean up the stored filename
+        try:
+            file_processor = get_file_processor()
+            if "stored_filename" in session:
+                file_processor.delete_file(session["stored_filename"], "uploads")
+        except Exception as e:
+            logger.warning(f"Failed to clean up preview file: {e}")
+
+        # Clean up session (optional - remove after a timeout in production)
+        # For now, keep it for the frontend to retrieve the result
+
+        return GradePhaseResponse(
+            phase="grading",
+            assignment_id=session_id,
+            status="completed",
+            elapsed_ms=elapsed,
+        )
+    except Exception as e:
+        logger.exception("Preview grade run phase failed")
+        elapsed = int((time.perf_counter() - start_ms) * 1000)
+        return GradePhaseResponse(phase="grading", error=str(e), elapsed_ms=elapsed)
+
+
+@router.get("/preview-grade/{session_id}/result")
+async def get_preview_grade_result(session_id: str):
+    """
+    Get the HTML result from a preview grading session.
+    """
+    if session_id not in _preview_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session = _preview_sessions[session_id]
+    html_result = session.get("html_result")
+
+    if not html_result:
+        raise HTTPException(status_code=400, detail="Grading not completed yet")
+
+    return {"html": html_result}
 
 
 @router.delete("/{assignment_id}")
@@ -741,3 +1163,39 @@ async def delete_assignment(
     db.delete(assignment)
     db.commit()
     return {"message": "Assignment deleted"}
+
+
+@router.post("/debug/test-markdown-conversion")
+async def test_markdown_conversion(markdown_input: str = Form(...)):
+    """
+    Debug endpoint to test markdown to HTML conversion.
+    Pass markdown_input as form parameter.
+    """
+    from app.services.markdown_converter import MarkdownGradingConverter
+
+    logger.info(f"[DEBUG] Input markdown length: {len(markdown_input)}")
+    logger.info(f"[DEBUG] Input markdown first 300 chars:\n{markdown_input[:300]}")
+
+    html_output = MarkdownGradingConverter.markdown_to_html(
+        markdown_input, include_styling=True
+    )
+
+    logger.info(f"[DEBUG] Output HTML length: {len(html_output)}")
+    logger.info(f"[DEBUG] Output HTML first 300 chars:\n{html_output[:300]}")
+    logger.info(f"[DEBUG] HTML == Input: {html_output == markdown_input}")
+    logger.info(f"[DEBUG] HTML contains <h: {'<h' in html_output}")
+    logger.info(f"[DEBUG] HTML contains <p: {'<p' in html_output}")
+    logger.info(f"[DEBUG] HTML contains <span: {'<span' in html_output}")
+
+    return {
+        "input_length": len(markdown_input),
+        "output_length": len(html_output),
+        "output": html_output,
+        "contains_html_tags": bool("<" in html_output and ">" in html_output),
+        "contains_h_tags": "<h" in html_output,
+        "contains_p_tags": "<p" in html_output,
+        "contains_span_tags": "<span" in html_output,
+        "is_unchanged": html_output == markdown_input,
+        "input_first_200": markdown_input[:200],
+        "output_first_200": html_output[:200],
+    }

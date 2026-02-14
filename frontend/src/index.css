@@ -118,8 +118,28 @@
 .graded-output.prose h3:first-child {
   margin-top: 0 !important;
 }
-.graded-output.prose h2 { font-size: 1.125rem !important; }
-.graded-output.prose h3 { font-size: 1rem !important; }
+.graded-output.prose h2 {
+  font-size: 1.125rem !important;
+  margin-top: 1.5em !important;
+  margin-bottom: 0.75em !important;
+}
+.graded-output.prose h3 {
+  font-size: 1.05rem !important;
+  font-weight: 600 !important;
+  margin-top: 1.5em !important;
+  margin-bottom: 0.75em !important;
+  color: #1f2937 !important;
+  border-bottom: 2px solid #e5e7eb !important;
+  padding-bottom: 0.5em !important;
+}
+.graded-output.prose h3 strong {
+  font-weight: 700 !important;
+  color: inherit !important;
+}
+.graded-output.prose h2 strong {
+  font-weight: 700 !important;
+  color: inherit !important;
+}
 .graded-output.prose p {
   margin-top: 0;
   margin-bottom: 0.75em;
@@ -138,11 +158,28 @@
   margin-top: 0.5em;
   margin-bottom: 0.75em;
 }
+.graded-output.prose ul li {
+  margin-bottom: 0.5em;
+  line-height: 1.6;
+}
+.graded-output.prose ul li br {
+  display: block;
+  content: "";
+  margin: 0.25em 0;
+}
+.graded-output.prose ul li strong {
+  display: inline;
+  font-weight: 700;
+}
 .graded-output.prose ol {
   list-style-type: decimal !important;
   padding-left: 1.5em !important;
   margin-top: 0.5em;
   margin-bottom: 0.75em;
+}
+.graded-output.prose h2 + ul,
+.graded-output.prose h3 + ul {
+  margin-top: 0.75em !important;
 }
 .graded-output.prose li {
   display: list-item !important;
@@ -154,10 +191,52 @@
 .graded-output .error {
   color: #111;
   text-decoration: line-through;
-  text-decoration-color: #b91c1c;
+  text-decoration-color: #dc2626;
 }
 .graded-output .correction {
-  color: #b91c1c;
+  color: #dc2626;
+}
+
+/* Correction markup support for new markdown-based system */
+.graded-output span[style*="color: red"] {
+  color: #dc2626 !important;
+  font-weight: 500;
+}
+
+.graded-output span[style*="text-decoration: line-through"] {
+  text-decoration: line-through;
+  text-decoration-color: #dc2626;
+  text-decoration-thickness: 2px;
+}
+
+.graded-output span[style*="text-decoration: underline"] {
+  text-decoration: underline;
+  text-decoration-color: #dc2626;
+  text-decoration-thickness: 2px;
+}
+
+/* CSS class-based correction markup (fallback) */
+.graded-output .correction-deletion {
+  color: #dc2626 !important;
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
+
+.graded-output .correction-addition {
+  color: #dc2626 !important;
+  font-weight: 500;
+}
+
+/* Grading section styling */
+.graded-section {
+  margin-bottom: 2rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.graded-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
 }
 
 /* Inline annotation styles */

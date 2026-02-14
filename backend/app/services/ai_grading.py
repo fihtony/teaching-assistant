@@ -16,7 +16,7 @@ from app.models import (
     GradingContext,
     CachedArticle,
 )
-from app.services.ai_providers import get_llm_provider
+from app.services.ai_providers import get_llm_provider, get_llm_provider_for_config
 from app.schemas.assignment import (
     QuestionType,
     GradingResult,
@@ -51,8 +51,15 @@ class AIGradingService:
     Implements two-stage grading: understanding context, then grading.
     """
 
-    def __init__(self, db: Session):
+    def __init__(
+        self,
+        db: Session,
+        ai_model_override: Optional[str] = None,
+        ai_provider_override: Optional[str] = None,
+    ):
         self.db = db
+        self.ai_model_override = ai_model_override
+        self.ai_provider_override = ai_provider_override
 
     async def _call_ai(
         self,
@@ -62,19 +69,33 @@ class AIGradingService:
         model: Optional[str] = None,
     ) -> str:
         """
-        Call the AI model using the user-defined provider and model from settings.
-        All modules use the common LLM provider interface; provider/model args are ignored.
+        Call the AI model using the user-defined provider and model from settings,
+        or using overrides if provided (e.g., for preview grading with custom model selection).
         """
-        llm = get_llm_provider(self.db)
+        # Use overrides from initialization if available (for preview grading), else use settings
+        if self.ai_model_override or self.ai_provider_override:
+            config = get_resolved_ai_config(self.db)
+            if self.ai_provider_override:
+                config["provider"] = self.ai_provider_override
+            if self.ai_model_override:
+                config["model"] = self.ai_model_override
+            from app.services.ai_providers import get_llm_provider_for_config
+
+            llm = get_llm_provider_for_config(config)
+        else:
+            llm = get_llm_provider(self.db)
+
         config = get_resolved_ai_config(self.db)
         timeout = config.get("timeout", 300)
         timeout = max(300, int(timeout)) if timeout is not None else 300
-        
+
         # Log debug info about the AI prompt invocation
+        ai_model = self.ai_model_override or config.get("model")
+        ai_provider = self.ai_provider_override or config.get("provider")
         logger.debug(
             "AI prompt invocation: provider=%s, model=%s, prompt_length=%d, system_prompt_length=%d, timeout=%d",
-            config.get("provider"),
-            config.get("model"),
+            ai_provider,
+            ai_model,
             len(prompt),
             len(system_prompt) if system_prompt else 0,
             timeout,
@@ -82,271 +103,13 @@ class AIGradingService:
         logger.debug("Prompt content:\n%s", prompt)
         if system_prompt:
             logger.debug("System prompt content:\n%s", system_prompt)
-        
-        logger.info("Calling AI: provider=%s, model=%s", config.get("provider"), config.get("model"))
+
+        logger.info("Calling AI: provider=%s, model=%s", ai_provider, ai_model)
         return await llm.complete(
             prompt,
             system_prompt=system_prompt,
             timeout=timeout,
         )
-
-    async def build_grading_context(
-        self, background: str, instructions: str, db: Session
-    ) -> Dict[str, Any]:
-        """
-        Stage 1: Build understanding for grading
-
-        Args:
-            background: Teacher-provided background.
-            instructions: Custom grading instructions.
-            db: Database session.
-
-        Returns:
-            Context dictionary with understanding and references.
-        """
-        search_service = get_search_service(db)
-
-        # Extract references from background
-        references = search_service.extract_book_references(background)
-
-        # Fetch article content for each book reference
-        fetched_articles = []
-        cached_article_ids = []
-
-        for book in references.get("books", []):
-            article_data = search_service.fetch_article_content(book)
-            if article_data:
-                fetched_articles.append(
-                    {
-                        "title": book,
-                        "summary": article_data.get("summary", ""),
-                        "quotes": article_data.get("quotes", [])[:5],
-                        "author": article_data.get("author"),
-                    }
-                )
-                if "cached_article_id" in article_data:
-                    cached_article_ids.append(article_data["cached_article_id"])
-
-        # Build context understanding prompt (background already includes any referenced articles)
-        context_prompt = f"""
-You are an expert English teacher grading student assignments.
-
-Background Information:
-{background}
-
-Teacher's Grading Instructions:
-{instructions}
-
-Summarize briefly the assignment context and key grading criteria.
-"""
-
-        try:
-            response = await self._call_ai(
-                prompt=context_prompt,
-                system_prompt="You are an expert English teacher. Analyze grading context carefully.",
-            )
-            # Use raw response as understanding (no JSON)
-            understanding = response.strip() if response else ""
-
-        except Exception as e:
-            logger.error(f"Context understanding error: {str(e)}")
-            understanding = f"Error: {str(e)}"
-
-        return {
-            "references": references,
-            "fetched_articles": fetched_articles,
-            "cached_article_ids": cached_article_ids,
-            "understanding": understanding,
-        }
-
-    async def understand_context(
-        self, background: str, instructions: str, db: Session
-    ) -> Dict[str, Any]:
-        """
-        Alias for build_grading_context for backward compatibility.
-
-        Args:
-            background: Teacher-provided background.
-            instructions: Custom grading instructions.
-            db: Database session.
-
-        Returns:
-            Context dictionary with understanding and references.
-        """
-        return await self.build_grading_context(background, instructions, db)
-
-    async def grade_assignment(
-        self,
-        assignment: Assignment,
-        context: Dict[str, Any],
-        question_types: List[QuestionType],
-    ) -> GradingResult:
-        """
-        Stage 2: Grade the assignment.
-
-        Args:
-            assignment: Assignment to grade.
-            context: Context from understand_context().
-            question_types: Types of questions in the assignment.
-
-        Returns:
-            GradingResult with detailed grading.
-        """
-        extracted_text = assignment.extracted_text or ""
-        background = context.get("background", "") or ""
-        instructions = context.get("instructions", "") or ""
-        understanding = context.get("understanding", "")
-        if isinstance(understanding, dict):
-            understanding = json.dumps(understanding, indent=2)
-        student_name = (context.get("student_name") or "").strip()
-        if not student_name and getattr(assignment, "student_name", None):
-            student_name = (assignment.student_name or "").strip()
-        if not student_name and getattr(assignment, "student", None) and assignment.student:
-            student_name = (assignment.student.name or "").strip()
-        if not student_name:
-            student_name = "Student"
-
-        # Build grading prompt (output as HTML, no JSON)
-        grading_prompt = f"""
-You are an expert English teacher grading an English assignment. Here's the context:
-
-STUDENT NAME: {student_name}
-
-ASSIGNMENT BACKGROUND:
-{background}
-
-GRADING INSTRUCTIONS:
-{instructions}
-
-CONTEXT UNDERSTANDING:
-{understanding}
-
-STUDENT'S WORK:
-{extracted_text}
-
-QUESTION TYPES TO GRADE: {[qt.value for qt in question_types]}
-
-Grade this assignment following these rules:
-1. For each question/section, determine if the answer is correct
-2. Provide specific, helpful comments for wrong answers
-3. Be encouraging but accurate
-4. For essays and writing, show corrections inline like a teacher's red pen
-
-HTML format requirements (you MUST follow these so corrections are visible):
-- Student's wrong text (to be deleted): wrap in <del>wrong text</del>. It will display as black text with a red strikethrough (student's original stays black; only the teacher's correction is red).
-- Your correction or added text: wrap in <span class="correction">corrected text</span> or <span style="color: #b91c1c;">corrected text</span> (red text for teacher's feedback).
-- Use <p> for paragraphs. For section titles you MUST use <h2> with inline bold so they stand out, e.g. <h2 style="font-weight: bold;">Revised Essay</h2>, <h2 style="font-weight: bold;">Detailed Corrections</h2>, <h2 style="font-weight: bold;">Teacher's Comments</h2>. Leave a blank line before each <h2> so sections are clearly separated.
-- Keep student's correct text in normal black; only mark errors with <del> and your corrections in red.
-- Example: "Many people have <del>an answer about</del><span class=\"correction\">different opinions on</span> the topic."
-
-Respond with your grading as HTML only. Structure your output with these sections (each as <h2> with content below): (1) Revised Essay — student's work with strikethrough and red corrections inline; (2) Detailed Corrections — list of corrections with explanations; (3) Teacher's Comments — use <ul><li> for each point under "What You Did Well" and "Areas for Improvement" so each point has a bullet, and put the closing sentence (e.g. "Keep up the great work!") in a separate <p> after the lists so there is clear spacing before it. Example: <h2>Teacher's Comments</h2><h3>What You Did Well</h3><ul><li>First point.</li><li>Second point.</li></ul><h3>Areas for Improvement</h3><ul><li>First point.</li></ul><p>Keep up the great work!</p> Output only the HTML document fragment, no JSON and no markdown code fences.
-"""
-
-        try:
-            response = await self._call_ai(
-                prompt=grading_prompt,
-                system_prompt="You are an expert English teacher. Grade fairly and provide constructive feedback. Output as HTML only. Use <del> for student's wrong text (it will show as black with red strikethrough) and <span class=\"correction\"> or red span for your corrections (red text). Student original text is always black; only teacher corrections are red.",
-            )
-
-            if not response:
-                raise ValueError("AI grading service returned empty response")
-
-            # Treat response as HTML (strip optional markdown code fence if present)
-            html_content = response.strip()
-            if html_content.startswith("```"):
-                # Remove opening ```html or ```
-                first_newline = html_content.find("\n")
-                if first_newline != -1:
-                    html_content = html_content[first_newline + 1 :]
-                if html_content.endswith("```"):
-                    html_content = html_content[:-3].strip()
-
-            return GradingResult(
-                items=[],
-                section_scores={},
-                overall_comment=None,
-                html_content=html_content,
-            )
-
-        except Exception as e:
-            logger.error(f"Grading error: {str(e)}")
-            raise
-
-    @staticmethod
-    def _understanding_to_lines(understanding: Union[str, dict, None]) -> Optional[str]:
-        """Format understanding as line-by-line text."""
-        if understanding is None:
-            return None
-        if isinstance(understanding, str):
-            return understanding.strip() or None
-        if isinstance(understanding, dict):
-            lines = []
-            for k, v in understanding.items():
-                if isinstance(v, (list, dict)):
-                    lines.append(f"{k}: {json.dumps(v, ensure_ascii=False)}")
-                else:
-                    lines.append(f"{k}: {v}")
-            return "\n".join(lines) if lines else None
-        return str(understanding)
-
-    async def grade_with_context(
-        self,
-        assignment: Assignment,
-        context: GradingContext,
-        question_types: Optional[List[QuestionType]] = None,
-    ) -> GradingResult:
-        """
-        Grade using an existing GradingContext (title, background, instructions).
-        Updates context with ai_understanding (line-by-line) and returns result.
-        """
-        if question_types is None:
-            question_types = [QuestionType.ESSAY]
-
-        # Stage 1: Build context dict (references + understanding)
-        context_dict = await self.build_grading_context(
-            background=context.background or "",
-            instructions=context.instructions or "",
-            db=self.db,
-        )
-        # Persist to ORM context
-        context.extracted_references = context_dict.get("references")
-        context.search_results = None
-        context.cached_article_ids = context_dict.get("cached_article_ids")
-        context.ai_understanding = self._understanding_to_lines(context_dict.get("understanding"))
-        self.db.commit()
-
-        # Pass background, instructions, student_name for grading prompt
-        context_dict["background"] = context.background or ""
-        context_dict["instructions"] = context.instructions or ""
-        student_name = (assignment.student_name or "").strip() if getattr(assignment, "student_name", None) else ""
-        if not student_name and getattr(assignment, "student", None) and assignment.student:
-            student_name = (assignment.student.name or "").strip()
-        context_dict["student_name"] = student_name
-
-        # Stage 2: Grade
-        return await self.grade_assignment(assignment, context_dict, question_types)
-
-    async def grade(
-        self,
-        assignment: Assignment,
-        question_types: Optional[List[QuestionType]] = None,
-    ) -> GradingResult:
-        """
-        Legacy: full pipeline with background/instructions from assignment.
-        Prefer grade_with_context when using GradingContext ORM.
-        """
-        if question_types is None:
-            question_types = [QuestionType.ESSAY]
-        background = getattr(assignment, "background", None) or ""
-        instructions = getattr(assignment, "instructions", None) or ""
-        context_dict = await self.understand_context(background=background, instructions=instructions, db=self.db)
-        context_dict["background"] = background
-        context_dict["instructions"] = instructions
-        context_dict["student_name"] = (getattr(assignment, "student_name", None) or "").strip() or (
-            (assignment.student.name if getattr(assignment, "student", None) and assignment.student else "Student")
-        )
-        return await self.grade_assignment(assignment, context_dict, question_types)
-
 
     async def run_context_prompt_phase(
         self,
@@ -384,7 +147,9 @@ Respond with your grading as HTML only. Structure your output with these section
         try:
             data = json.loads(text)
         except json.JSONDecodeError as e:
-            logger.warning("Context prompt JSON parse failed, using raw as instruction: %s", e)
+            logger.warning(
+                "Context prompt JSON parse failed, using raw as instruction: %s", e
+            )
             data = {
                 "extracted_references": {"books": [], "articles": [], "authors": []},
                 "final_grading_instruction": text[:8000],
@@ -392,7 +157,12 @@ Respond with your grading as HTML only. Structure your output with these section
         refs = data.get("extracted_references") or {}
         if not isinstance(refs, dict):
             refs = {"books": [], "articles": [], "authors": []}
-        final_instruction = (data.get("final_grading_instruction") or "").strip() or "Grade the assignment fairly with constructive feedback."
+
+        final_instruction = (
+            data.get("final_grading_instruction") or ""
+        ).strip() or "Grade the assignment fairly with constructive feedback."
+        output_requirements = (data.get("output_requirements") or "").strip() or ""
+
         search_service = get_search_service(self.db)
         books = refs.get("books") or []
         cached_article_ids = []
@@ -403,8 +173,15 @@ Respond with your grading as HTML only. Structure your output with these section
         context.extracted_references = refs
         context.cached_article_ids = cached_article_ids if cached_article_ids else None
         context.ai_understanding = final_instruction
+        context.output_requirements = (
+            output_requirements if output_requirements else None
+        )
         self.db.commit()
-        return {"extracted_references": refs, "final_grading_instruction": final_instruction}
+        return {
+            "extracted_references": refs,
+            "final_grading_instruction": final_instruction,
+            "output_requirements": output_requirements,
+        }
 
     async def run_grading_prompt_phase(
         self,
@@ -413,40 +190,63 @@ Respond with your grading as HTML only. Structure your output with these section
         student_name: str,
     ) -> str:
         """
-        Run the grading prompt using context.ai_understanding as final instruction and assignment.extracted_text.
-        Returns HTML grading result.
+        Run the grading prompt using context.ai_understanding as grading criteria.
+        Returns markdown output with special markup for corrections.
+        The markdown will be converted to HTML/PDF/Word by the frontend or export service.
         """
-        final_instruction = (context.ai_understanding or "").strip() or "Grade the assignment with constructive feedback. Output HTML with <del> for errors and <span class=\"correction\"> for corrections."
+        final_instruction = (
+            context.ai_understanding or ""
+        ).strip() or "Grade the assignment with constructive feedback."
+        output_reqs = (context.output_requirements or "").strip() or ""
         homework = (assignment.extracted_text or "").strip() or "(No content)"
         student_name_display = (student_name or "").strip()
         assignment_title = (context.title or "").strip() or "(No title provided)"
-        if student_name_display:
-            salutation_rule = "In the Teacher's Comments section, address the student with 'Dear " + student_name_display + ",' (use this exact salutation)."
-        else:
-            salutation_rule = "In the Teacher's Comments section, use 'Dear,' only (no name after it). Do not use 'Dear Student' or any other default name."
+
+        # Escape braces in output_reqs so they survive .format() call
+        # ({{ in format string becomes { in output, so we need to double them)
+        output_reqs_escaped = output_reqs.replace("{", "{{").replace("}", "}}")
+
         prompt = GRADING_PROMPT.format(
             assignment_title=assignment_title,
             student_name=student_name_display or "(no name provided)",
-            student_salutation_rule=salutation_rule,
             final_grading_instruction=final_instruction,
+            output_requirements=output_reqs_escaped,
             student_homework=homework,
         )
         response = await self._call_ai(
             prompt=prompt,
-            system_prompt="You are an expert English teacher. Output only the required HTML fragment.",
+            system_prompt="You are an expert English teacher. Output only the markdown format specified. Do not include JSON or code fences.",
         )
         if not response:
             raise ValueError("Grading prompt returned empty response")
-        html = response.strip()
-        if html.startswith("```"):
-            first = html.find("\n")
+
+        markdown = response.strip()
+
+        # Remove markdown code fences if present
+        if markdown.startswith("```"):
+            first = markdown.find("\n")
             if first != -1:
-                html = html[first + 1 :]
-            if html.endswith("```"):
-                html = html[:-3].strip()
-        return html
+                markdown = markdown[first + 1 :]
+            if markdown.endswith("```"):
+                markdown = markdown[:-3].strip()
+
+        return markdown
 
 
-def get_ai_grading_service(db: Session) -> AIGradingService:
-    """Get an AI grading service instance."""
-    return AIGradingService(db)
+def get_ai_grading_service(
+    db: Session,
+    ai_model_override: Optional[str] = None,
+    ai_provider_override: Optional[str] = None,
+) -> AIGradingService:
+    """Get an AI grading service instance.
+
+    Args:
+        db: Database session
+        ai_model_override: Optional AI model to use instead of the one from settings (useful for preview grading)
+        ai_provider_override: Optional AI provider to use instead of the one from settings
+    """
+    return AIGradingService(
+        db,
+        ai_model_override=ai_model_override,
+        ai_provider_override=ai_provider_override,
+    )
