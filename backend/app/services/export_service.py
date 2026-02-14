@@ -353,8 +353,13 @@ h2, h3 {{ font-weight: bold; margin-top: 1em; }}
         return pdf_bytes
 
     def _html_to_docx(self, html_content: str, title: str) -> bytes:
-        """Convert HTML fragment to DOCX bytes (for HTML-only grading result)."""
+        """Convert HTML fragment to DOCX bytes while preserving formatting from inline styles.
+
+        Extracts colors and strikethrough from HTML span styles and applies them to Word formatting.
+        """
         from docx import Document
+        from docx.shared import RGBColor
+        import re
 
         doc = Document()
         doc.add_heading(f"Graded Assignment: {title}", 0)
@@ -362,21 +367,22 @@ h2, h3 {{ font-weight: bold; margin-top: 1em; }}
         doc.add_paragraph()
 
         soup = BeautifulSoup(html_content, "html.parser")
+
         for el in soup.find_all(["h1", "h2", "h3", "p", "ul", "ol"]):
             if el.name in ("h1", "h2", "h3"):
                 level = {"h1": 0, "h2": 1, "h3": 2}[el.name]
-                text = el.get_text(separator=" ", strip=True)
-                if text:
-                    doc.add_heading(text, level=level)
+                # Process heading with styles
+                p = doc.add_paragraph(style=f"Heading {level + 1}")
+                self._process_element_with_styles(p, el)
             elif el.name == "p":
-                text = el.get_text(separator=" ", strip=True)
-                if text:
-                    doc.add_paragraph(text)
+                # Process paragraph with styles
+                p = doc.add_paragraph()
+                self._process_element_with_styles(p, el)
             elif el.name in ("ul", "ol"):
                 for li in el.find_all("li", recursive=False):
-                    text = li.get_text(separator=" ", strip=True)
-                    if text:
-                        doc.add_paragraph(text, style="List Bullet")
+                    # Process list item with styles
+                    p = doc.add_paragraph(style="List Bullet")
+                    self._process_element_with_styles(p, li)
 
         # If no block elements found, add whole body as paragraphs
         if len(doc.paragraphs) <= 2:
@@ -391,6 +397,95 @@ h2, h3 {{ font-weight: bold; margin-top: 1em; }}
         docx_bytes = buffer.getvalue()
         buffer.close()
         return docx_bytes
+
+    def _process_element_with_styles(self, paragraph, element):
+        """Process an HTML element and apply styles (colors, strikethrough) to Word paragraph.
+
+        Recursively processes child elements and extracts style information from spans.
+        Handles text-decoration-color for red strikethrough lines.
+        """
+        from docx.shared import RGBColor
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        import re
+
+        for content in element.children:
+            if isinstance(content, str):
+                # Plain text
+                text = str(content).strip()
+                if text:
+                    run = paragraph.add_run(text)
+            else:
+                # HTML element
+                tag_name = content.name
+
+                if tag_name == "span":
+                    # Extract style attribute
+                    style = content.get("style", "")
+                    text = content.get_text()
+
+                    if text:
+                        run = paragraph.add_run(text)
+
+                        # Check if this is strikethrough with red decoration (deletion in Word)
+                        has_strikethrough = "text-decoration: line-through" in style
+                        has_red_strike_color = "text-decoration-color: #dc2626" in style
+
+                        # For Word export: use light grey + italic for deleted text (strikethrough with red color indicator)
+                        # This is because in Word, strikethrough color automatically follows text color
+                        if has_strikethrough and has_red_strike_color:
+                            # Use light grey for text and add italic for emphasis
+                            run.font.color.rgb = RGBColor(160, 160, 160)  # Light grey
+                            run.italic = True
+                        else:
+                            # Extract and apply text color normally for non-deleted text
+                            color_match = re.search(
+                                r"color:\s*#([0-9A-Fa-f]{6})", style
+                            )
+                            if color_match:
+                                hex_color = color_match.group(1)
+                                r = int(hex_color[0:2], 16)
+                                g = int(hex_color[2:4], 16)
+                                b = int(hex_color[4:6], 16)
+                                run.font.color.rgb = RGBColor(r, g, b)
+
+                        # Apply strikethrough if present
+                        if "text-decoration: line-through" in style:
+                            run.font.strikethrough = True
+                            # Also apply at XML level to ensure it shows in Word
+                            rPr = run._element.rPr
+                            if rPr is None:
+                                rPr = OxmlElement("w:rPr")
+                                run._element.insert(0, rPr)
+                            # Create strike element
+                            strike = OxmlElement("w:strike")
+                            # Remove existing strike if present
+                            for existing_strike in rPr.findall(qn("w:strike")):
+                                rPr.remove(existing_strike)
+                            rPr.append(strike)
+
+                        # Apply underline if present
+                        if "text-decoration: underline" in style:
+                            run.underline = True
+
+                        # Apply bold if needed
+                        if "font-weight: bold" in style:
+                            run.bold = True
+
+                elif tag_name == "em":
+                    text = content.get_text()
+                    if text:
+                        run = paragraph.add_run(text)
+                        run.italic = True
+
+                elif tag_name == "br":
+                    paragraph.add_run("\n")
+
+                else:
+                    # Recursively process other elements
+                    text = content.get_text()
+                    if text:
+                        run = paragraph.add_run(text)
 
     async def export(
         self,

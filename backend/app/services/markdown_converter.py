@@ -323,21 +323,25 @@ class MarkdownGradingConverter:
     @staticmethod
     def markdown_to_docx(markdown_content: str) -> bytes:
         """
-        Convert markdown grading output to DOCX format.
+        Convert markdown grading output to DOCX format with tracking mode enabled.
 
-        Note: Requires python-docx library.
-        This is a placeholder - actual implementation would use python-docx.
+        Converts markdown markup to Word formatting:
+        - ~~deleted~~ → Red text with strikethrough (tracked deletion)
+        - {{added}} → Red text (tracked insertion)
+        - ~~old~~{{new}} → Red replacement (old struck, new underlined)
 
         Args:
             markdown_content: Markdown text with special correction markup
 
         Returns:
-            DOCX file as bytes
+            DOCX file as bytes with tracking changes enabled
         """
         try:
             from docx import Document
             from docx.shared import Pt, RGBColor
             from docx.enum.text import WD_ALIGN_PARAGRAPH
+            from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn
         except ImportError:
             raise ImportError(
                 "python-docx is required for DOCX export. "
@@ -346,21 +350,36 @@ class MarkdownGradingConverter:
 
         doc = Document()
 
+        # Enable Track Changes in the document
+        MarkdownGradingConverter._enable_track_changes(doc)
+
         # Parse and add content
         lines = markdown_content.split("\n")
         for line in lines:
             if line.startswith("### "):
-                # Heading level 3
-                p = doc.add_paragraph(line[4:].strip(), style="Heading 3")
+                # Heading level 3 with formatting
+                heading_text = line[4:].strip()
+                MarkdownGradingConverter._add_formatted_paragraph(
+                    doc, heading_text, style="Heading 3"
+                )
             elif line.startswith("## "):
-                # Heading level 2
-                p = doc.add_paragraph(line[3:].strip(), style="Heading 2")
+                # Heading level 2 with formatting
+                heading_text = line[3:].strip()
+                MarkdownGradingConverter._add_formatted_paragraph(
+                    doc, heading_text, style="Heading 2"
+                )
             elif line.startswith("# "):
-                # Heading level 1
-                p = doc.add_paragraph(line[2:].strip(), style="Heading 1")
+                # Heading level 1 with formatting
+                heading_text = line[2:].strip()
+                MarkdownGradingConverter._add_formatted_paragraph(
+                    doc, heading_text, style="Heading 1"
+                )
             elif line.startswith("- "):
-                # Bullet point
-                p = doc.add_paragraph(line[2:].strip(), style="List Bullet")
+                # Bullet point with formatting
+                bullet_text = line[2:].strip()
+                MarkdownGradingConverter._add_formatted_paragraph(
+                    doc, bullet_text, style="List Bullet"
+                )
             elif line.strip():
                 # Regular paragraph
                 MarkdownGradingConverter._add_formatted_paragraph(doc, line.strip())
@@ -373,18 +392,47 @@ class MarkdownGradingConverter:
         return byte_stream.getvalue()
 
     @staticmethod
-    def _add_formatted_paragraph(doc, text: str):
+    def _enable_track_changes(doc):
+        """
+        Enable Track Changes in the Word document.
+
+        This allows Word to display changes as tracked revisions when opened.
+        """
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        # Access document settings
+        settings = doc.settings
+        settings_element = settings._element
+
+        # Add revision tracking element if not present
+        track_changes = OxmlElement("w:trackRevisions")
+        settings_element.append(track_changes)
+
+    @staticmethod
+    def _add_formatted_paragraph(doc, text: str, style: str = None):
         """
         Add a paragraph to the document with correction markup converted to formatting.
 
         Handles ~~deletion~~, {{addition}}, and ~~old~~{{new}} markup.
+        Applies red text color and strikethrough/underline for tracked changes visibility.
+
+        Args:
+            doc: python-docx Document object
+            text: Text content with markup
+            style: Optional paragraph style (e.g., 'Heading 1', 'List Bullet')
         """
         from docx.shared import RGBColor
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
 
-        p = doc.add_paragraph()
+        # Add paragraph with optional style
+        if style:
+            p = doc.add_paragraph(style=style)
+        else:
+            p = doc.add_paragraph()
 
         # Process the text and apply formatting
-        pos = 0
         remaining = text
 
         while remaining:
@@ -395,17 +443,23 @@ class MarkdownGradingConverter:
                 # Add text before the match
                 if match.start() > 0:
                     run = p.add_run(remaining[: match.start()])
-                    run.font.color.rgb = RGBColor(0, 0, 0)  # Black
+                    run.font.color.rgb = RGBColor(17, 17, 17)  # Dark gray/black
 
                 # Add deleted (old) text in red with strikethrough
                 deleted_run = p.add_run(match.group(1))
-                deleted_run.font.color.rgb = RGBColor(255, 0, 0)  # Red
-                deleted_run.font.strikethrough = True
+                # Set red color (via XML) and strikethrough (via both API and XML)
+                deleted_run.font.strikethrough = True  # API call for compatibility
+                MarkdownGradingConverter._apply_red_formatting(
+                    deleted_run, strikethrough=True
+                )
 
                 # Add added (new) text in red with underline
                 added_run = p.add_run(match.group(2))
-                added_run.font.color.rgb = RGBColor(255, 0, 0)  # Red
+                # Set red color (via XML) and underline (via API)
                 added_run.underline = True
+                MarkdownGradingConverter._apply_red_formatting(
+                    added_run, strikethrough=False
+                )
 
                 remaining = remaining[match.end() :]
             else:
@@ -416,12 +470,15 @@ class MarkdownGradingConverter:
                     # Add text before the match
                     if match.start() > 0:
                         run = p.add_run(remaining[: match.start()])
-                        run.font.color.rgb = RGBColor(0, 0, 0)  # Black
+                        run.font.color.rgb = RGBColor(17, 17, 17)  # Dark gray/black
 
                     # Add deleted text in red with strikethrough
                     deleted_run = p.add_run(match.group(1))
-                    deleted_run.font.color.rgb = RGBColor(255, 0, 0)  # Red
-                    deleted_run.font.strikethrough = True
+                    # Set red color (via XML) and strikethrough (via both API and XML)
+                    deleted_run.font.strikethrough = True  # API call for compatibility
+                    MarkdownGradingConverter._apply_red_formatting(
+                        deleted_run, strikethrough=True
+                    )
 
                     remaining = remaining[match.end() :]
                 else:
@@ -432,18 +489,56 @@ class MarkdownGradingConverter:
                         # Add text before the match
                         if match.start() > 0:
                             run = p.add_run(remaining[: match.start()])
-                            run.font.color.rgb = RGBColor(0, 0, 0)  # Black
+                            run.font.color.rgb = RGBColor(17, 17, 17)  # Dark gray/black
 
                         # Add added text in red
                         added_run = p.add_run(match.group(1))
-                        added_run.font.color.rgb = RGBColor(255, 0, 0)  # Red
+                        # Set red color using XML manipulation
+                        MarkdownGradingConverter._apply_red_formatting(
+                            added_run, strikethrough=False
+                        )
+                        added_run.underline = True
 
                         remaining = remaining[match.end() :]
                     else:
                         # No more markup, add remaining text
                         run = p.add_run(remaining)
-                        run.font.color.rgb = RGBColor(0, 0, 0)  # Black
+                        run.font.color.rgb = RGBColor(17, 17, 17)  # Dark gray/black
                         remaining = ""
+
+    @staticmethod
+    def _apply_red_formatting(run, strikethrough: bool = False):
+        """
+        Apply red formatting to a run using direct XML manipulation.
+
+        This function sets:
+        - Text color to red (C00000 - Word standard red)
+        - Strikethrough if requested
+
+        Uses pure XML manipulation to ensure formatting is preserved in Word export.
+        """
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        rPr = run._element.get_or_add_rPr()
+
+        # Step 1: Remove any existing color elements to avoid conflicts
+        for color_elem in list(rPr.findall(qn("w:color"))):
+            rPr.remove(color_elem)
+
+        # Step 2: Remove any existing strikethrough elements to avoid conflicts
+        for strike_elem in list(rPr.findall(qn("w:strike"))):
+            rPr.remove(strike_elem)
+
+        # Step 3: Add red color element
+        color_elem = OxmlElement("w:color")
+        color_elem.set(qn("w:val"), "C00000")  # Word standard red
+        rPr.append(color_elem)
+
+        # Step 4: Add strikethrough element if requested
+        if strikethrough:
+            strike_elem = OxmlElement("w:strike")
+            rPr.append(strike_elem)
 
     @staticmethod
     def extract_sections(markdown_content: str) -> Dict[str, str]:

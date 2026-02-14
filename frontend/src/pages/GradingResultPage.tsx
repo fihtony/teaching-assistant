@@ -333,7 +333,7 @@ export function GradingResultPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="flex-1 min-h-0">
-            <div className="rounded-lg bg-gray-50 p-4 h-full overflow-auto max-h-[70vh]">
+            <div className="rounded-lg bg-gray-50 p-4 h-full overflow-auto max-h-[87.5vh]">
               <pre className="whitespace-pre-wrap text-sm text-gray-700">
                 {assignment.extracted_text || "Content extraction pending..."}
               </pre>
@@ -352,7 +352,7 @@ export function GradingResultPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="flex-1 min-h-0">
-            <div className="rounded-lg border bg-gray-50 p-4 h-full overflow-auto max-h-[70vh]">
+            <div className="rounded-lg border bg-gray-50 p-4 h-full overflow-auto max-h-[87.5vh]">
               {assignment.graded_content ? (
                 <GradedOutputDisplay html={assignment.graded_content} />
               ) : assignment.grading_results ? (
