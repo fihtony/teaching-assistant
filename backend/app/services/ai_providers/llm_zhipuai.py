@@ -8,7 +8,7 @@ from app.core.logging import get_logger
 from app.services.ai_providers._litellm import completion
 logger = get_logger()
 
-DEFAULT_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
+DEFAULT_BASE_URL = "https://open.bigmodel.cn/api/coding/paas/v4"
 
 
 def _normalize_model(model: str) -> str:

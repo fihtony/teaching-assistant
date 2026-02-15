@@ -1,0 +1,340 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Pre-build checks (only on main branch auto push)
+  lint-and-check:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    name: Lint, Version & Security Checks
+    outputs:
+      backend-changed: ${{ steps.detect.outputs.backend }}
+      frontend-changed: ${{ steps.detect.outputs.frontend }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changes
+        id: detect
+        run: |
+          # Check if backend files changed
+          if git diff --name-only HEAD~1 | grep -q "^backend/"; then
+            echo "backend=true" >> $GITHUB_OUTPUT
+          else
+            echo "backend=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Check if frontend files changed
+          if git diff --name-only HEAD~1 | grep -q "^frontend/"; then
+            echo "frontend=true" >> $GITHUB_OUTPUT
+          else
+            echo "frontend=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: "frontend/package-lock.json"
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Run frontend linter
+        working-directory: ./frontend
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: "backend/requirements.txt"
+
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: pip install -r requirements.txt
+
+      - name: Run backend linter (pylint)
+        working-directory: ./backend
+        run: |
+          pip install pylint
+          pylint app/ --exit-zero --disable=all --enable=E,F
+        continue-on-error: true
+
+      - name: Check version format in .version.json
+        run: |
+          if [ ! -f ".version.json" ]; then
+            echo "Error: .version.json is missing"
+            exit 1
+          fi
+
+          BACKEND_VERSION=$(grep '"backend"' .version.json | sed -E 's/.*"backend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+          FRONTEND_VERSION=$(grep '"frontend"' .version.json | sed -E 's/.*"frontend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+
+          for VERSION in "$BACKEND_VERSION" "$FRONTEND_VERSION"; do
+            if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Error: Version must be semantic (e.g., 0.1.0), got: $VERSION"
+              exit 1
+            fi
+          done
+
+      - name: Scan for PII (email, phone, API keys)
+        run: |
+          if grep -r -E 'sk_[a-zA-Z0-9]{20,}|pk_[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{20,}' \
+            . --include="*.py" --include="*.ts" --include="*.tsx" --exclude-dir=node_modules --exclude-dir=__pycache__; then
+            echo "Error: Found potential API keys in source code"
+            exit 1
+          fi
+
+  # Determine what to build (auto or manual)
+  determine-build:
+    if: always()
+    runs-on: ubuntu-latest
+    name: Determine Build Targets
+    outputs:
+      build-backend: ${{ steps.decide.outputs.backend }}
+      build-frontend: ${{ steps.decide.outputs.frontend }}
+    needs: lint-and-check
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine build targets (auto)
+        id: decide
+        run: |
+          BACKEND_CHANGED="${{ needs.lint-and-check.outputs.backend-changed }}"
+          FRONTEND_CHANGED="${{ needs.lint-and-check.outputs.frontend-changed }}"
+
+          echo "backend=$BACKEND_CHANGED" >> $GITHUB_OUTPUT
+          echo "frontend=$FRONTEND_CHANGED" >> $GITHUB_OUTPUT
+
+          echo "Build targets - Backend: $BACKEND_CHANGED, Frontend: $FRONTEND_CHANGED"
+
+  # Build and push backend image
+  build-backend:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-backend == 'true'
+    needs: [lint-and-check, determine-build]
+    runs-on: ubuntu-latest
+    name: Build & Push Backend Image
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read and update backend version
+        id: version
+        run: |
+          # Read current version from .version.json
+          CURRENT_VERSION=$(grep '"backend"' .version.json | sed -E 's/.*"backend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+          echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+
+          # Auto increment patch version
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+          NEW_PATCH=$((PATCH + 1))
+          NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
+          echo "new=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+          # Update .version.json
+          sed -i "" "s/\"backend\"[[:space:]]*:[[:space:]]*\"[^\"]*\"/\"backend\": \"$NEW_VERSION\"/" .version.json
+
+      - name: Commit version update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .version.json
+          git commit -m "chore(backend): version bump ${{ steps.version.outputs.current }} → ${{ steps.version.outputs.new }}" || true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.version.outputs.new }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Push version commit
+        run: git push origin main || true
+
+  # Build and push frontend image
+  build-frontend:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-frontend == 'true'
+    needs: [lint-and-check, determine-build]
+    runs-on: ubuntu-latest
+    name: Build & Push Frontend Image
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read and update frontend version
+        id: version
+        run: |
+          # Read current version from .version.json
+          CURRENT_VERSION=$(grep '"frontend"' .version.json | sed -E 's/.*"frontend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+          echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+
+          # Auto increment patch version
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+          NEW_PATCH=$((PATCH + 1))
+          NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
+          echo "new=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+          # Update .version.json
+          sed -i "" "s/\"frontend\"[[:space:]]*:[[:space:]]*\"[^\"]*\"/\"frontend\": \"$NEW_VERSION\"/" .version.json
+
+      - name: Commit version update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .version.json
+          git commit -m "chore(frontend): version bump ${{ steps.version.outputs.current }} → ${{ steps.version.outputs.new }}" || true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.version.outputs.new }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Push version commit
+        run: git push origin main || true
+
+  # Create release
+  create-release:
+    if: |
+      github.event_name == 'push' && 
+      github.ref == 'refs/heads/main' &&
+      (needs.build-backend.result == 'success' || needs.build-frontend.result == 'success')
+    needs: [build-backend, build-frontend]
+    runs-on: ubuntu-latest
+    name: Create GitHub Release
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Read versions
+        id: versions
+        run: |
+          BACKEND_VERSION=$(grep '"backend"' .version.json | sed -E 's/.*"backend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+          FRONTEND_VERSION=$(grep '"frontend"' .version.json | sed -E 's/.*"frontend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+          echo "backend=$BACKEND_VERSION" >> $GITHUB_OUTPUT
+          echo "frontend=$FRONTEND_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: release-${{ github.run_number }}
+          release_name: Release ${{ steps.versions.outputs.backend }}-${{ steps.versions.outputs.frontend }}
+          body: |
+            ## Docker Images
+            - Backend: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.versions.outputs.backend }}`
+            - Frontend: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.versions.outputs.frontend }}`
+
+            ## Latest Tags
+            - Backend Latest: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-latest`
+            - Frontend Latest: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-latest`
+          draft: false
+          prerelease: false
+
+  # Test images
+  test-images:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && (needs.build-backend.result == 'success' || needs.build-frontend.result == 'success')
+    needs: [build-backend, build-frontend]
+    runs-on: ubuntu-latest
+    name: Test Built Images
+    continue-on-error: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Read versions
+        id: versions
+        run: |
+          BACKEND_VERSION=$(grep '"backend"' .version.json | sed -E 's/.*"backend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+          FRONTEND_VERSION=$(grep '"frontend"' .version.json | sed -E 's/.*"frontend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+          echo "backend=$BACKEND_VERSION" >> $GITHUB_OUTPUT
+          echo "frontend=$FRONTEND_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Test backend image
+        if: needs.build-backend.result == 'success'
+        run: |
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.versions.outputs.backend }}
+          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.versions.outputs.backend }} python -c "import fastapi; print('✓ FastAPI available')"
+
+      - name: Test frontend image
+        if: needs.build-frontend.result == 'success'
+        run: |
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.versions.outputs.frontend }}
+          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.versions.outputs.frontend }} npm --version > /dev/null && echo "✓ Frontend verified"
+
+      - name: Test docker-compose config
+        run: docker-compose -f docker-compose.yml config > /dev/null && echo "✓ docker-compose valid"

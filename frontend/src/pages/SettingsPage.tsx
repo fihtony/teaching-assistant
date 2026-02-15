@@ -42,7 +42,7 @@ export function SettingsPage() {
   const [searchEngine, setSearchEngine] = useState("duckduckgo");
 
   // Last-saved values: save buttons enabled only when form is dirty
-  const [lastSavedProfile, setLastSavedProfile] = useState<typeof profile | null>(null);
+  const [lastSavedProfile, setLastSavedProfile] = useState<Partial<typeof profile> | null>(null);
   const [lastSavedAiConfig, setLastSavedAiConfig] = useState<{
     provider: string;
     model: string;
@@ -130,13 +130,14 @@ export function SettingsPage() {
 
   React.useEffect(() => {
     if (settingsData) {
-      const d = settingsData as Record<string, unknown>;
-      const provider = (d.provider ?? d.default_provider) as string || "openai";
-      const model = (d.model ?? d.default_model) as string || "gpt-4";
-      const base_url = (d.base_url ?? d.api_base_url) as string || "";
+      const d = settingsData as unknown as Record<string, unknown>;
+      const provider = ((d.provider ?? d.default_provider) as string) || "openai";
+      const model = ((d.model ?? d.default_model) as string) || "gpt-4";
+      const base_url = ((d.base_url ?? d.api_base_url) as string) || "";
       const temperature = (d.temperature as number) ?? 0.7;
       const max_tokens = (d.max_tokens as number) ?? 4096;
       const search_engine = (d.search_engine as string) || "duckduckgo";
+
       setAiConfig({
         provider,
         model,
@@ -167,21 +168,16 @@ export function SettingsPage() {
     aiConfig.max_tokens !== lastSavedAiConfig.max_tokens ||
     aiConfig.api_key !== "";
 
-  const isSearchEngineDirty =
-    lastSavedSearchEngine == null || searchEngine !== lastSavedSearchEngine;
+  const isSearchEngineDirty = lastSavedSearchEngine == null || searchEngine !== lastSavedSearchEngine;
 
   // Get Models button: (a) Copilot -> enable if base_url not empty; (b) non-Copilot -> enable if base_url and api_key both not empty; (c) saved config for current provider -> enable if base_url not empty
   const settings = settingsData as unknown as Record<string, unknown> | undefined;
-  const savedProvider =
-    settings && (settings.default_provider ?? settings.provider);
-  const isSavedConfigForProvider =
-    !!settings && String(savedProvider) === aiConfig.provider;
+  const savedProvider = settings && (settings.default_provider ?? settings.provider);
+  const isSavedConfigForProvider = !!settings && String(savedProvider) === aiConfig.provider;
   const getModelsDisabled =
     isLoadingModels ||
     !aiConfig.base_url?.trim() ||
-    (aiConfig.provider !== "copilot" &&
-      !isSavedConfigForProvider &&
-      !aiConfig.api_key?.trim());
+    (aiConfig.provider !== "copilot" && !isSavedConfigForProvider && !aiConfig.api_key?.trim());
 
   const handleSaveProfile = () => {
     profileMutation.mutate(profile);
@@ -210,11 +206,7 @@ export function SettingsPage() {
     }
     setIsLoadingModels(true);
     try {
-      const result = await settingsApi.getModels(
-        aiConfig.provider,
-        aiConfig.base_url,
-        aiConfig.api_key || undefined
-      );
+      const result = await settingsApi.getModels(aiConfig.provider, aiConfig.base_url, aiConfig.api_key || undefined);
       setAvailableModels(result.models);
       if (result.error) {
         showNotification({ type: "error", message: result.error });
@@ -353,10 +345,16 @@ export function SettingsPage() {
                     zhipuai: "https://open.bigmodel.cn/api/coding/paas/v4",
                     copilot: "http://localhost:1287",
                   };
-                  if (
-                    !aiConfig.base_url ||
-                    Object.values(defaultUrls).includes(aiConfig.base_url)
-                  ) {
+
+                  // Check if current base_url is any provider's known default (including old URLs)
+                  const allKnownDefaultUrls = [
+                    ...Object.values(defaultUrls),
+                    "https://open.bigmodel.cn/api/paas/v4", // Old incorrect zhipu URL
+                  ];
+                  const isCurrentUrlADefault = allKnownDefaultUrls.includes(aiConfig.base_url);
+
+                  // Replace base_url if it's empty or is any provider's default URL
+                  if (!aiConfig.base_url || isCurrentUrlADefault) {
                     newBaseUrl = defaultUrls[newProvider] ?? aiConfig.base_url;
                   }
 
@@ -383,7 +381,9 @@ export function SettingsPage() {
               <Input
                 id="base_url"
                 value={aiConfig.base_url}
-                onChange={(e) => setAiConfig((c) => ({ ...c, base_url: e.target.value }))}
+                onChange={(e) => {
+                  setAiConfig((c) => ({ ...c, base_url: e.target.value }));
+                }}
                 placeholder={
                   aiConfig.provider === "openai"
                     ? "https://api.openai.com/v1"
@@ -448,10 +448,12 @@ export function SettingsPage() {
                 className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:bg-gray-100 disabled:cursor-not-allowed"
               >
                 <option value="">-- Select a model --</option>
-                {availableModels.length > 0 ? (
+                {(availableModels || []).length > 0 ? (
                   availableModels.map((m, idx) => {
-                    const modelId = typeof m === "string" ? m : (m as { id?: string; name?: string }).id ?? (m as { name?: string }).name ?? "";
-                    const modelName = typeof m === "string" ? m : (m as { name?: string; id?: string }).name ?? (m as { id?: string }).id ?? modelId;
+                    const modelId =
+                      typeof m === "string" ? m : ((m as { id?: string; name?: string }).id ?? (m as { name?: string }).name ?? "");
+                    const modelName =
+                      typeof m === "string" ? m : ((m as { name?: string; id?: string }).name ?? (m as { id?: string }).id ?? modelId);
                     return (
                       <option key={`${modelId}-${idx}`} value={modelId}>
                         {modelName || modelId}

@@ -74,7 +74,7 @@ async def get_settings(db: Session = Depends(get_db)):
 
     provider = config_data.get("provider", "zhipuai")
     model = config_data.get("model", "glm-4-flash")
-    base_url = config_data.get("baseUrl", "https://open.bigmodel.cn/api/paas/v4")
+    base_url = config_data.get("baseUrl", "https://open.bigmodel.cn/api/coding/paas/v4")
     temperature = config_data.get("temperature", 0.3)
     max_token = config_data.get("max_token", 8192)
     # Never send real api_key to frontend; frontend uses empty and backend uses DB key when needed
@@ -204,7 +204,7 @@ async def update_settings(
     # Parse existing config (defaults: free-tier ZhipuAI)
     config_data = config.config or {
         "provider": "zhipuai",
-        "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+        "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
         "model": "glm-4-flash",
         "max_token": 4096,
         "temperature": 0.3,

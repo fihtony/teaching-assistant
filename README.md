@@ -2,57 +2,172 @@
 
 AI-powered assignment grading for English teachers. Supports multiple question types, auto grading, annotations, and personalized greetings.
 
-## Quick start
+## Quick Start
+
+### Local Development
 
 ```bash
 ./scripts/start.sh
 ```
 
-- **Frontend**: http://localhost:3090
-- **Backend API**: http://localhost:8090
-- **API docs**: http://localhost:8090/docs
+Frontend: http://localhost:3090 | Backend: http://localhost:8090 | Docs: http://localhost:8090/docs
 
-## Requirements
-
-- Python 3.9+
-- Node.js 18+
-
-## Setup (manual)
+### Docker Container
 
 ```bash
-# Backend
-cd backend && python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-
-# Frontend
-cd frontend && npm install
+docker-compose up -d
 ```
 
-**Initialize database (run once before first app launch):**
+Frontend: http://localhost:9011 | Backend: http://localhost:8090 (internal only)
+
+---
+
+## Build Docker Images
+
+### Build Backend
+
+```bash
+cd backend
+docker build --tag ghcr.io/$REGISTRY_OWNER/teaching-assistant:backend-0.1.1 .
+```
+
+### Build Frontend
+
+```bash
+cd frontend
+docker build --tag ghcr.io/$REGISTRY_OWNER/teaching-assistant:frontend-0.1.1 .
+```
+
+### Build Both
+
+```bash
+./scripts/build.sh
+```
+
+---
+
+## Docker Compose Setup
+
+### Initialize Environment (macOS)
+
+```bash
+bash scripts/docker-init.sh
+```
+
+This creates:
+
+- `.env` file with your macOS username and paths
+- Data folder: `~/apps/teaching-assistant/data`
+- Logs folder: `~/apps/teaching-assistant/logs`
+
+### Alternative: Manual Setup
+
+```bash
+# Copy example env file
+cp .env.example .env
+
+# Edit .env with your values
+# REGISTRY_OWNER=your-username
+# DATA_PATH=${HOME}/apps/teaching-assistant/data
+# LOGS_PATH=${HOME}/apps/teaching-assistant/logs
+
+# Create folders
+mkdir -p ~/apps/teaching-assistant/data
+mkdir -p ~/apps/teaching-assistant/logs
+```
+
+### Start Services
+
+```bash
+docker-compose up -d
+```
+
+### View Logs
+
+```bash
+docker-compose logs -f backend
+docker-compose logs -f frontend
+```
+
+### Stop Services
+
+```bash
+docker-compose down
+```
+
+### Stop & Remove Volumes
+
+```bash
+docker-compose down -v
+```
+
+### Folder Mounting
+
+```yaml
+Host Path                                   Container Path
+~/apps/teaching-assistant/data       →      /app/data
+~/apps/teaching-assistant/logs       →      /app/logs
+```
+
+### Verify Mount
+
+```bash
+# Check from container
+docker-compose exec backend ls -la /app/data
+
+# Check from host
+ls -la ~/apps/teaching-assistant/data
+```
+
+---
+
+## Local Development Setup
+
+### Backend
+
+```bash
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python -m uvicorn main:app --host 0.0.0.0 --port 8090 --reload
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+### Database
 
 ```bash
 ./scripts/init_db.sh
 ```
 
-Or from backend: `cd backend && python -m scripts.init_db`. The app does not create or migrate the database on startup; run this step manually once.
+---
 
-Run backend: `cd backend && source venv/bin/activate && python -m uvicorn main:app --host 0.0.0.0 --port 8090 --reload`  
-Run frontend: `cd frontend && npm run dev` (serves on port 3090)
+## Project Structure
 
-Stop: `./scripts/stop.sh`
+- `backend/` — FastAPI, services, SQLite DB
+- `frontend/` — React + TypeScript + Vite
+- `config.yaml` — Server, logging, storage config
+- `data/` — Database and uploads (gitignored)
+- `logs/` — Application logs (gitignored)
+- `scripts/` — Start/stop/build helpers
 
-## Project layout
+---
 
-- `backend/` — FastAPI app, services, DB (SQLite)
-- `frontend/` — React + TypeScript (Vite)
-- `config.yaml` — Server, logging, storage (AI/search/greeting/OCR are in DB)
-- `scripts/start.sh`, `scripts/stop.sh` — Start/stop services
+## Security
 
-## Security (before public deploy)
+- Do not commit `.env` or API keys
+- Use environment variables for secrets
+- Set `TEACHING_ENCRYPTION_KEY` in production
+- Keep `data/`, `logs/`, `.env` out of repo
 
-- **Secrets**: Do not commit `.env` or real API keys. Use environment variables (e.g. `TEACHING_ENCRYPTION_KEY` for encrypting stored API keys).
-- **Encryption**: In production, set `TEACHING_ENCRYPTION_KEY`; the in-code default is for local use only.
-- **Data**: `data/`, `logs/` and `.env` are gitignored; keep them out of the repo.
+---
 
 ## License
 

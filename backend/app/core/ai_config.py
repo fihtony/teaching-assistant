@@ -42,7 +42,7 @@ def get_resolved_ai_config(db: Session) -> Dict[str, Any]:
     model = (cfg.get("model") or "glm-4-flash").strip()
     base_url = cfg.get("baseUrl") or cfg.get("api_base") or ""
     if not base_url and provider in ("zhipuai", "zhipu"):
-        base_url = "https://open.bigmodel.cn/api/paas/v4"
+        base_url = "https://open.bigmodel.cn/api/coding/paas/v4"
     elif not base_url and provider == "openai":
         base_url = "https://api.openai.com/v1"
 

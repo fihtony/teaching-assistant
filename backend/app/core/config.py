@@ -104,12 +104,34 @@ def get_backend_dir() -> Path:
     return Path(__file__).parent.parent.parent
 
 
+def _resolve_data_dir() -> Path:
+    """
+    Resolve the data directory path.
+
+    Supports two modes:
+    1. Container mode: DATA_DIR environment variable is set (e.g., /app/data)
+    2. Local development: Uses project root/data
+
+    Returns:
+        Absolute path to the data directory.
+    """
+    data_dir_env = os.environ.get("DATA_DIR")
+
+    if data_dir_env:
+        # Container mode: use the environment variable
+        return Path(data_dir_env).resolve()
+    else:
+        # Local development: use project root/data
+        return (get_project_root() / "data").resolve()
+
+
 def get_storage_path(storage_type: str) -> Path:
     """
-    Get the absolute path for a storage directory under project root data/.
+    Get the absolute path for a storage directory.
 
-    All persistent data (uploads, graded output, templates, cache) live under
-    project_root/data/ so they are not under backend/ and survive across runs.
+    Supports both container and local development modes:
+    - Container: /app/data/{uploads|graded|templates|cache}
+    - Local: project_root/data/{uploads|graded|templates|cache}
 
     Args:
         storage_type: One of 'uploads', 'graded', 'templates', 'cache'
@@ -118,7 +140,6 @@ def get_storage_path(storage_type: str) -> Path:
         Absolute path to the storage directory.
     """
     config = get_config()
-    root = get_project_root()
 
     storage_map = {
         "uploads": config.storage.uploads_dir,
@@ -128,30 +149,67 @@ def get_storage_path(storage_type: str) -> Path:
     }
 
     relative_path = storage_map.get(storage_type, config.storage.uploads_dir)
-    absolute_path = (root / relative_path).resolve()
+
+    # Get the base data directory
+    data_dir = _resolve_data_dir()
+
+    # Extract the subdirectory name from the config path
+    # e.g., "data/uploads" -> "uploads"
+    subdirs = Path(relative_path).parts[-1]  # Get the last part of the path
+
+    absolute_path = (data_dir / subdirs).resolve()
     absolute_path.mkdir(parents=True, exist_ok=True)
 
     return absolute_path
 
 
 def get_database_path() -> Path:
-    """Get the absolute path to the database file.
+    """
+    Get the absolute path to the database file.
+
+    Supports both container and local development modes:
+    - Container: /app/data/teaching.db
+    - Local: project_root/data/teaching.db
+
     Used by: app.core.database (engine).
-    Default value: config.yaml 'database.path' or DatabaseConfig.path in config.py ('data/teaching.db').
+    Default value: config.yaml 'database.path' or DatabaseConfig.path in config.py.
     """
     config = get_config()
-    root = get_project_root()
-    db_path = (root / config.database.path).resolve()
+
+    # Get the base data directory
+    data_dir = _resolve_data_dir()
+
+    # Extract the filename from the config path
+    # e.g., "data/teaching.db" -> "teaching.db"
+    db_filename = Path(config.database.path).name
+
+    db_path = (data_dir / db_filename).resolve()
     db_path.parent.mkdir(parents=True, exist_ok=True)
     return db_path
 
 
 def get_log_path() -> Path:
-    """Get the absolute path to the log file. Always under project root logs/ folder."""
+    """
+    Get the absolute path to the log file.
+
+    Supports both container and local development modes:
+    - Container: /app/logs/app.log
+    - Local: project_root/logs/app.log
+    """
     config = get_config()
-    root = get_project_root()
-    log_dir = root / "logs"
+
+    # Check for LOGS_DIR environment variable (set by docker-compose)
+    logs_dir_env = os.environ.get("LOGS_DIR")
+
+    if logs_dir_env:
+        # Container mode: use the environment variable
+        log_dir = Path(logs_dir_env)
+    else:
+        # Local development: use project root/logs
+        log_dir = get_project_root() / "logs"
+
     log_dir.mkdir(parents=True, exist_ok=True)
+
     # Use only the filename from config so logs never go outside logs/
     name = Path(config.logging.file).name or "app.log"
     return log_dir / name

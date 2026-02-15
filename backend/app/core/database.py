@@ -1,10 +1,10 @@
 """
 Database configuration and session management.
 
-Schema is created only by running the init-db step manually (see scripts/init_db.py).
-Application startup must NOT create or migrate the database.
+Database is automatically initialized on first startup if needed.
 """
 
+from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
@@ -92,3 +92,22 @@ init_db = create_tables_and_seed
 def drop_db():
     """Drop all tables. For testing only."""
     Base.metadata.drop_all(bind=get_engine())
+
+
+def init_db_if_needed():
+    """
+    Initialize database on startup if it doesn't exist.
+
+    If database file exists, does nothing and returns immediately.
+    If database doesn't exist, creates tables and seeds initial data.
+
+    This is called automatically on application startup.
+    """
+    db_path = get_database_path()
+
+    # Check if database file exists
+    if db_path.exists():
+        return  # Database already exists, nothing to do
+
+    # Database doesn't exist, initialize it
+    create_tables_and_seed()

@@ -17,7 +17,6 @@ import { memo, useMemo } from "react";
 interface GradedOutputDisplayProps {
   html: string;
   className?: string;
-  showSectionTitles?: boolean;
 }
 
 /**
@@ -37,12 +36,8 @@ function isHtmlContent(content: string): boolean {
   return isHtml;
 }
 
-export const GradedOutputDisplay = memo(function GradedOutputDisplay({
-  html,
-  className = "",
-  showSectionTitles = true,
-}: GradedOutputDisplayProps) {
-  const { isHtml, safeHtml } = useMemo(() => {
+export const GradedOutputDisplay = memo(function GradedOutputDisplay({ html, className = "" }: GradedOutputDisplayProps) {
+  const { safeHtml } = useMemo(() => {
     if (!html) return { isHtml: false, safeHtml: "" };
 
     const htmlChecked = isHtmlContent(html);

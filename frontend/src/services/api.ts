@@ -79,7 +79,6 @@ export const assignmentsApi = {
     return response.data;
   },
 
-  // Grade an assignment (optional body: background, template_id for grading)
   // Export assignment
   export: async (id: string, format: ExportFormat = "pdf"): Promise<Blob> => {
     const response = await api.get(`/assignments/${id}/export`, {
@@ -87,11 +86,6 @@ export const assignmentsApi = {
       responseType: "blob",
     });
     return response.data;
-  },
-
-  // Delete assignment
-  delete: async (id: string): Promise<void> => {
-    await api.delete(`/assignments/${id}`);
   },
 
   // 3-phase grading flow (optional signal for cancel)
@@ -282,7 +276,7 @@ export const settingsApi = {
     });
     const data = response.data as { models?: unknown[]; error?: string; message?: string };
     return {
-      models: data.models || [],
+      models: (data.models || []) as (string | { name: string; vendor: string; id: string })[],
       error: data.error,
       message: data.message,
     };

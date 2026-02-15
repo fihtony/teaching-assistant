@@ -1,83 +1,28 @@
 #!/bin/bash
-
-# ===============================================
-# English Teaching Assignment Grading System
-# Stop Script for macOS/Linux
-# ===============================================
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+set -e
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}================================================${NC}"
-echo -e "${BLUE}  Stopping Assignment Grading System${NC}"
-echo -e "${BLUE}================================================${NC}"
-echo ""
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+DOCKER_COMPOSE_FILE="$PROJECT_DIR/docker-compose.yml"
 
-# Stop backend
-stop_backend() {
-    echo -e "${YELLOW}Stopping backend server...${NC}"
-    
-    if [ -f "$PROJECT_ROOT/.backend.pid" ]; then
-        BACKEND_PID=$(cat "$PROJECT_ROOT/.backend.pid")
-        if kill -0 $BACKEND_PID 2>/dev/null; then
-            kill $BACKEND_PID 2>/dev/null
-            echo -e "${GREEN}✓ Backend stopped (PID: $BACKEND_PID)${NC}"
-        else
-            echo -e "${YELLOW}Backend process not running${NC}"
-        fi
-        rm -f "$PROJECT_ROOT/.backend.pid"
-    else
-        # Try to kill by port
-        if lsof -Pi :8090 -sTCP:LISTEN -t >/dev/null 2>&1; then
-            kill $(lsof -t -i:8090) 2>/dev/null
-            echo -e "${GREEN}✓ Backend stopped${NC}"
-        else
-            echo -e "${YELLOW}No backend process found${NC}"
-        fi
-    fi
-}
+echo -e "${YELLOW}Stopping and removing Teaching Assistant containers...${NC}"
 
-# Stop frontend
-stop_frontend() {
-    echo -e "${YELLOW}Stopping frontend server...${NC}"
-    
-    if [ -f "$PROJECT_ROOT/.frontend.pid" ]; then
-        FRONTEND_PID=$(cat "$PROJECT_ROOT/.frontend.pid")
-        if kill -0 $FRONTEND_PID 2>/dev/null; then
-            kill $FRONTEND_PID 2>/dev/null
-            echo -e "${GREEN}✓ Frontend stopped (PID: $FRONTEND_PID)${NC}"
-        else
-            echo -e "${YELLOW}Frontend process not running${NC}"
-        fi
-        rm -f "$PROJECT_ROOT/.frontend.pid"
-    else
-        # Try to kill by port
-        if lsof -Pi :3090 -sTCP:LISTEN -t >/dev/null 2>&1; then
-            kill $(lsof -t -i:3090) 2>/dev/null
-            echo -e "${GREEN}✓ Frontend stopped${NC}"
-        else
-            echo -e "${YELLOW}No frontend process found${NC}"
-        fi
-    fi
-}
+# Stop and remove containers
+docker-compose -f "$DOCKER_COMPOSE_FILE" down
 
-# Main execution
-main() {
-    stop_backend
-    stop_frontend
-    
-    echo ""
-    echo -e "${GREEN}================================================${NC}"
-    echo -e "${GREEN}  System stopped successfully!${NC}"
-    echo -e "${GREEN}================================================${NC}"
-    echo ""
-}
+echo -e "${GREEN}✓ Containers stopped and removed${NC}"
 
-main
+# Ask if user wants to remove volumes
+read -p "Do you want to remove volumes? (y/n, default: n): " REMOVE_VOLUMES
+if [ "$REMOVE_VOLUMES" == "y" ] || [ "$REMOVE_VOLUMES" == "Y" ]; then
+    docker-compose -f "$DOCKER_COMPOSE_FILE" down -v
+    echo -e "${GREEN}✓ Volumes removed${NC}"
+fi
+
+echo -e "\n${GREEN}Cleanup completed!${NC}"

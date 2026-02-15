@@ -29,7 +29,7 @@ def ensure_settings_config(db: Session) -> Settings:
             type="ai-config",
             config={
                 "provider": "zhipuai",
-                "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+                "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
                 "model": "glm-4-flash",
                 "max_token": 4096,
                 "temperature": 0.3,

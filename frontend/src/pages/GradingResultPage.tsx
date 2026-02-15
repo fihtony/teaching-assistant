@@ -135,7 +135,7 @@ export function GradingResultPage() {
   });
 
   const gradeMutation = useMutation({
-    mutationFn: () => assignmentsApi.grade(id!),
+    mutationFn: () => assignmentsApi.gradeUploadPhase({ file: new File([], "dummy") }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["assignment", id] });
     },

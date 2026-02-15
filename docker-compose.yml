@@ -1,0 +1,73 @@
+version: "3.8"
+
+services:
+  # Init service to create data folders if they don't exist
+  init:
+    image: busybox:latest
+    container_name: teaching-assistant-init
+    command: sh -c "mkdir -p /app/data /app/logs && echo 'Folders initialized'"
+    networks:
+      - teaching-network
+  backend:
+    image: ghcr.io/${REGISTRY_OWNER}/teaching-assistant:backend-${BACKEND_VERSION}
+    container_name: teaching-assistant-backend
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      - DATA_DIR=/app/data
+      - LOGS_DIR=/app/logs
+    volumes:
+      - ${DATA_PATH}:/app/data
+      - ${LOGS_PATH}:/app/logs
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import requests; requests.get('http://localhost:8090/api/v1/greeting', timeout=5)",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - teaching-network
+    restart: unless-stopped
+    user: "2000:2000"
+
+  frontend:
+    image: ghcr.io/${REGISTRY_OWNER}/teaching-assistant:frontend-${FRONTEND_VERSION}
+    container_name: teaching-assistant-frontend
+    ports:
+      - "9011:3090"
+    environment:
+      - REACT_APP_API_URL=http://backend:8090
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://localhost:3090/",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - teaching-network
+    restart: unless-stopped
+    user: "2000:2000"
+
+networks:
+  teaching-network:
+    driver: bridge

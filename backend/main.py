@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import get_config, get_log_path, get_storage_path
+from app.core.database import init_db_if_needed
 from app.core.logging import setup_logging, get_logger
 from app.api import api_router
 
@@ -34,7 +35,10 @@ async def lifespan(app: FastAPI):
     logger.info("Starting English Teaching Assignment Grading System...")
     logger.debug("Log level: %s, log file: %s", get_config().logging.level, log_path)
 
-    # Do not init or migrate database on startup; run init-db script once manually.
+    # Initialize database if it doesn't exist
+    logger.info("Checking database...")
+    init_db_if_needed()
+    logger.info("Database ready")
 
     # Ensure storage directories exist
     for storage_type in ["uploads", "graded", "templates", "cache"]:
