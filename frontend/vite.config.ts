@@ -11,6 +11,8 @@ export default defineConfig({
     },
   },
   server: {
+    host: true,
+    allowedHosts: ['teaching.tarch.ca'],
     port: 3090,
     proxy: {
       "/api": {

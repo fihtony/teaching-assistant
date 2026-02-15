@@ -4,7 +4,7 @@ AIGrading model for storing each grading run (assignment + context + result).
 
 from enum import Enum
 
-from sqlalchemy import Column, Integer, BigInteger, String, Text, ForeignKey, Enum as SQLEnum, JSON
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, Enum as SQLEnum, JSON
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -27,7 +27,9 @@ class AIGrading(Base):
 
     __tablename__ = "ai_grading"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    # Use Integer instead of BigInteger for better SQLite compatibility
+    # SQLite treats INTEGER PRIMARY KEY as 64-bit internally
+    id = Column(Integer, primary_key=True, autoincrement=True)
     teacher_id = Column(Integer, ForeignKey("teachers.id"), nullable=False)
     assignment_id = Column(Integer, ForeignKey("assignments.id"), nullable=False)
     context_id = Column(Integer, ForeignKey("grading_contexts.id"), nullable=False)
