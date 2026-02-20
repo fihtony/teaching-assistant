@@ -12,12 +12,14 @@ from app.schemas.assignment import (
     GradingItemResult,
     SectionScore,
     GradingResult,
-
     GradedAssignment,
     GradePhaseResponse,
     AssignmentListItem,
     AssignmentListResponse,
     AssignmentDetail,
+    ReviseGradingRequest,
+    ReviseGradingResponse,
+    SaveRevisionRequest,
 )
 
 from app.schemas.template import (
@@ -55,12 +57,14 @@ __all__ = [
     "GradingItemResult",
     "SectionScore",
     "GradingResult",
-
     "GradedAssignment",
     "GradePhaseResponse",
     "AssignmentListItem",
     "AssignmentListResponse",
     "AssignmentDetail",
+    "ReviseGradingRequest",
+    "ReviseGradingResponse",
+    "SaveRevisionRequest",
     # Template
     "TemplateBase",
     "TemplateCreate",

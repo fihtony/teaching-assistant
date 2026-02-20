@@ -15,6 +15,7 @@ import {
   GradingPage,
   BuildInstructionPage,
 } from "@/pages";
+import { RevisePage } from "@/pages/RevisePage";
 
 function App() {
   useEffect(() => {
@@ -30,6 +31,7 @@ function App() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/grading" element={<GradingPage />} />
         <Route path="/grade/:id" element={<GradingResultPage />} />
+        <Route path="/grade/:id/revise" element={<RevisePage />} />
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/templates" element={<TemplatesPage />} />
         <Route path="/build-instruction" element={<BuildInstructionPage />} />

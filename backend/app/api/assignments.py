@@ -685,6 +685,7 @@ async def get_assignment(
         grading_results=grading_results,
         graded_content=graded_content,
         grading_model=grading_model,
+        ai_grading_id=latest.id if latest else None,
     )
 
 
@@ -816,6 +817,187 @@ async def get_dashboard_stats(db: Session = Depends(get_db)):
         "this_week": this_week,
         "needs_review": needs_review,
     }
+
+
+@router.post("/{assignment_id}/grade/revise", response_model=None)
+async def revise_grading(
+    assignment_id: int,
+    body: dict,
+    db: Session = Depends(get_db),
+):
+    """
+    Revise an existing AI grading output based on teacher's instruction.
+    Does NOT modify the database — returns revised HTML content only.
+    """
+    from app.schemas.assignment import ReviseGradingResponse
+    from app.services.ai_prompts import REVISE_GRADING_PROMPT
+    from app.services.markdown_converter import MarkdownGradingConverter
+
+    start_ms = time.perf_counter()
+
+    ai_grading_id = body.get("ai_grading_id")
+    teacher_instruction = body.get("teacher_instruction", "").strip()
+    current_html_content = body.get("current_html_content", "").strip()
+
+    if not teacher_instruction:
+        return ReviseGradingResponse(
+            html_content="",
+            error="Teacher instruction is required",
+            elapsed_ms=0,
+        ).model_dump()
+
+    if not ai_grading_id:
+        return ReviseGradingResponse(
+            html_content="",
+            error="ai_grading_id is required",
+            elapsed_ms=0,
+        ).model_dump()
+
+    # Get the AI grading record with context
+    ai_rec = (
+        db.query(AIGrading)
+        .options(joinedload(AIGrading.context).joinedload(GradingContext.template))
+        .filter(AIGrading.id == ai_grading_id, AIGrading.assignment_id == assignment_id)
+        .first()
+    )
+
+    if not ai_rec or not ai_rec.context:
+        elapsed = int((time.perf_counter() - start_ms) * 1000)
+        return ReviseGradingResponse(
+            html_content="",
+            error="AI grading record or context not found",
+            elapsed_ms=elapsed,
+        ).model_dump()
+
+    try:
+        context = ai_rec.context
+        background = (context.background or "").strip() or "Not provided."
+        template_instruction = ""
+        if context.template and context.template.instructions:
+            template_instruction = context.template.instructions
+        if not template_instruction:
+            template_instruction = "None."
+        custom_instruction = (context.instructions or "").strip() or "None."
+
+        # Build prompt with current graded output and teacher's revision instruction
+        prompt = REVISE_GRADING_PROMPT.format(
+            background=background,
+            template_instruction=template_instruction,
+            custom_instruction=custom_instruction,
+            current_graded_output=current_html_content,
+            teacher_revise_instruction=teacher_instruction,
+        )
+
+        grading_service = get_ai_grading_service(db)
+        response = await grading_service._call_ai(
+            prompt=prompt,
+            system_prompt="You are an expert English teacher. Revise the grading output based on the teacher's instruction. Output only the revised markdown content. Do not include JSON or code fences.",
+        )
+
+        if not response:
+            elapsed = int((time.perf_counter() - start_ms) * 1000)
+            return ReviseGradingResponse(
+                html_content="",
+                error="AI returned empty response",
+                elapsed_ms=elapsed,
+            ).model_dump()
+
+        markdown = response.strip()
+        # Remove markdown code fences if present
+        if markdown.startswith("```"):
+            first = markdown.find("\n")
+            if first != -1:
+                markdown = markdown[first + 1 :]
+            if markdown.endswith("```"):
+                markdown = markdown[:-3].strip()
+
+        html_content = MarkdownGradingConverter.markdown_to_html(
+            markdown, include_styling=True
+        )
+
+        elapsed = int((time.perf_counter() - start_ms) * 1000)
+        return ReviseGradingResponse(
+            html_content=html_content,
+            elapsed_ms=elapsed,
+        ).model_dump()
+
+    except Exception as e:
+        logger.exception("Revise grading failed")
+        elapsed = int((time.perf_counter() - start_ms) * 1000)
+        return ReviseGradingResponse(
+            html_content="",
+            error=str(e),
+            elapsed_ms=elapsed,
+        ).model_dump()
+
+
+@router.put("/{assignment_id}/grade/save-revision")
+async def save_revision(
+    assignment_id: int,
+    body: dict,
+    db: Session = Depends(get_db),
+):
+    """
+    Save a revised grading output as the final version.
+    Updates ai_grading.results with the new HTML content, update graded_at and updated_at.
+    Also stores revision_history in the results JSON.
+    """
+    ai_grading_id = body.get("ai_grading_id")
+    html_content = body.get("html_content", "").strip()
+    revision_history = body.get("revision_history", [])
+
+    if not ai_grading_id or not html_content:
+        raise HTTPException(
+            status_code=400,
+            detail="ai_grading_id and html_content are required",
+        )
+
+    ai_rec = (
+        db.query(AIGrading)
+        .filter(AIGrading.id == ai_grading_id, AIGrading.assignment_id == assignment_id)
+        .first()
+    )
+
+    if not ai_rec:
+        raise HTTPException(status_code=404, detail="AI grading record not found")
+
+    try:
+        # Parse existing results or create new
+        existing_results = {}
+        if ai_rec.results:
+            try:
+                existing_results = (
+                    json.loads(ai_rec.results)
+                    if isinstance(ai_rec.results, str)
+                    else ai_rec.results
+                )
+            except Exception:
+                existing_results = {}
+
+        # Update html_content and add revision_history
+        existing_results["html_content"] = html_content
+        existing_results["revision_history"] = revision_history
+
+        now = get_now_with_timezone().isoformat()
+        ai_rec.results = json.dumps(existing_results, ensure_ascii=False)
+        ai_rec.graded_at = now
+        ai_rec.updated_at = now
+        db.commit()
+
+        return {
+            "message": "Revision saved successfully",
+            "ai_grading_id": ai_rec.id,
+            "graded_at": now,
+            "updated_at": now,
+        }
+
+    except Exception as e:
+        logger.exception("Save revision failed")
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save revision: {str(e)}",
+        )
 
 
 @router.patch("/{assignment_id}/grading-time")

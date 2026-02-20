@@ -182,6 +182,33 @@ export const assignmentsApi = {
     const response = await api.get(`/assignments/preview-grade/${sessionId}/result`);
     return response.data;
   },
+
+  // Revise a graded output based on teacher's instruction (no DB change)
+  reviseGrading: async (
+    assignmentId: number,
+    data: {
+      ai_grading_id: number;
+      teacher_instruction: string;
+      current_html_content: string;
+    },
+    signal?: AbortSignal,
+  ): Promise<{ html_content: string; elapsed_ms?: number; error?: string }> => {
+    const response = await api.post(`/assignments/${assignmentId}/grade/revise`, data, { signal });
+    return response.data;
+  },
+
+  // Save a revised version as the final graded output
+  saveRevision: async (
+    assignmentId: number,
+    data: {
+      ai_grading_id: number;
+      html_content: string;
+      revision_history?: Array<{ instruction: string; timestamp: string }>;
+    },
+  ): Promise<{ message: string; ai_grading_id: number; graded_at: string; updated_at: string }> => {
+    const response = await api.put(`/assignments/${assignmentId}/grade/save-revision`, data);
+    return response.data;
+  },
 };
 
 // Templates API

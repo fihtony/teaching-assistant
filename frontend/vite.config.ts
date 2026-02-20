@@ -10,9 +10,15 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  test: {
+    globals: true,
+    environment: "jsdom",
+    setupFiles: ["./src/test/setup.ts"],
+    css: true,
+  },
   server: {
     host: true,
-    allowedHosts: ['teaching.tarch.ca'],
+    allowedHosts: ["teaching.tarch.ca"],
     port: 3090,
     proxy: {
       "/api": {

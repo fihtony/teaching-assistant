@@ -9,7 +9,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { assignmentsApi } from "@/services/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Download, FileText, CheckCircle, AlertTriangle, Star, Sparkles, Clock, XCircle } from "lucide-react";
+import { ArrowLeft, Download, FileText, CheckCircle, AlertTriangle, Star, Sparkles, Clock, XCircle, Pencil } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { GradedOutputDisplay } from "@/components/common/GradedOutputDisplay";
 
@@ -186,7 +186,7 @@ export function GradingResultPage() {
     <div>
       {/* Header */}
       <div className="mb-6 flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
+        <Button variant="ghost" size="icon" onClick={() => navigate("/history")} aria-label="Back">
           <ArrowLeft className="h-5 w-5" />
         </Button>
         <h1 className="text-2xl font-bold text-gray-900 flex-1 truncate" title={assignment.title || "Assignment"}>
@@ -347,8 +347,16 @@ export function GradingResultPage() {
               <span className="flex items-center gap-2">
                 {getGradingOutputIcon(assignment.ai_grading_status).icon}
                 AI Graded Output
+                {assignment.grading_model && (
+                  <span className="text-xs italic text-gray-500 font-normal ml-2">by {assignment.grading_model}</span>
+                )}
               </span>
-              {assignment.grading_model && <span className="text-xs italic text-gray-500 font-normal">by {assignment.grading_model}</span>}
+              {assignment.graded_content && (
+                <Button variant="outline" size="sm" onClick={() => navigate(`/grade/${id}/revise`)}>
+                  <Pencil className="mr-1 h-4 w-4" />
+                  Revise
+                </Button>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent className="flex-1 min-h-0">

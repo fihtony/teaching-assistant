@@ -133,3 +133,64 @@ Format your response using ONLY markdown (headers, bold, lists, etc.). Follow th
 
 Now grade the student's homework according to the grading instruction and output_requirements specified above. Output ONLY pure markdown following the format in output_requirements — MUST not include JSON, code blocks, or any other format.
 """
+
+# Placeholders: {background}, {template_instruction}, {custom_instruction},
+#               {current_graded_output}, {teacher_revise_instruction}
+REVISE_GRADING_PROMPT = """You are an expert English teacher revising an AI-graded assignment based on the teacher's feedback.
+
+## MOST IMPORTANT — Teacher's Revision Instruction
+>>> PAY CLOSE ATTENTION — This is the teacher's direct request. Follow it precisely. <<<
+{teacher_revise_instruction}
+>>> END of teacher's revision instruction <<<
+
+## CRITICAL: Correction Markup Rules
+
+You MUST use special markup with DOUBLE BRACES (not single) for all corrections:
+
+1. **Deletions**: ~~deleted text~~
+   - Example: ~~word~~
+
+2. **Additions**: {{added text}}
+   - Example: {{word}} (use two {{ and two }})
+
+3. **Replacements**: ~~old~~{{new}}
+   - Example: ~~incorrect~~{{correct}}
+
+## Supported Markdown Formatting
+
+You may ONLY use:
+- `~~deleted~~` for deletions
+- `{{added}}` for additions  
+- `~~old~~{{new}}` for replacements
+- `**bold**` for emphasis
+- `*italic*` for emphasis
+- `## Header` for section headers
+- `- bullet` for lists
+
+Do NOT use HTML tags, code fences (```), or single braces.
+
+## Context
+
+**Background**: {background}
+
+**Template Instructions**: {template_instruction}
+
+**Custom Instructions**: {custom_instruction}
+
+## Current Graded Output (HTML format — revise and output as markdown)
+
+{current_graded_output}
+
+---
+
+## Revision Instructions
+
+1. Read the teacher's revision instruction FIRST — it takes HIGHEST PRIORITY.
+2. Revise the current graded output according to the teacher's request.
+3. Keep the overall structure (Revised Essay, Detailed Corrections, Teacher's Comments) UNLESS the teacher asks to change it.
+4. Use the correction markup (~~deletions~~, {{additions}}, ~~old~~{{new}}) in the revised text.
+5. Convert the output to clean markdown (no HTML tags).
+6. Output ONLY the revised markdown content — no JSON, code blocks, or explanations.
+
+Now revise the graded output according to the teacher's instruction. Output ONLY pure markdown.
+"""

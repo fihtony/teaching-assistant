@@ -83,6 +83,7 @@ export interface Assignment {
   graded_content?: string;
   grading_results?: unknown;
   total_score?: number;
+  ai_grading_id?: number;
 }
 
 // Question type config

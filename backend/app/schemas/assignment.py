@@ -93,7 +93,6 @@ class GradingResult(BaseModel):
     html_content: Optional[str] = None  # AI output as HTML when using HTML grading
 
 
-
 class AIGradingStatusEnum(str, Enum):
     """AI grading run status."""
 
@@ -120,7 +119,9 @@ class GradePhaseResponse(BaseModel):
     """Response for each phase of the grading flow."""
 
     phase: str  # "upload", "analyze_context", "grading"
-    assignment_id: Optional[Union[int, str]] = None  # int for persistent grading, str (UUID) for preview
+    assignment_id: Optional[Union[int, str]] = (
+        None  # int for persistent grading, str (UUID) for preview
+    )
     context_id: Optional[int] = None
     ai_grading_id: Optional[int] = None
     status: Optional[str] = None
@@ -172,17 +173,46 @@ class AssignmentDetail(BaseModel):
     updated_at: Optional[str] = None  # from assignments.updated_at
     extracted_text: Optional[str] = None
     # From latest grading_context + ai_grading
-    title: Optional[str] = None  # from grading_contexts.title, falls back to "Assignment"
+    title: Optional[str] = (
+        None  # from grading_contexts.title, falls back to "Assignment"
+    )
     template_name: Optional[str] = None  # from grading_templates.name
     ai_grading_status: Optional[str] = None  # from ai_grading.status
     graded_at: Optional[str] = None
     background: Optional[str] = None
     instructions: Optional[str] = None
-    grading_time: Optional[int] = None  # duration in seconds from ai_grading.grading_time
+    grading_time: Optional[int] = (
+        None  # duration in seconds from ai_grading.grading_time
+    )
     essay_topic: Optional[str] = None  # fallback/legacy
     grading_results: Optional[GradingResult] = None
     graded_content: Optional[str] = None
     grading_model: Optional[str] = None
+    ai_grading_id: Optional[int] = None  # ai_grading.id for revise reference
 
     class Config:
         from_attributes = True
+
+
+class ReviseGradingRequest(BaseModel):
+    """Request to revise a graded output."""
+
+    ai_grading_id: int
+    teacher_instruction: str  # The teacher's revision instruction
+    current_html_content: str  # The current version of graded HTML being revised
+
+
+class ReviseGradingResponse(BaseModel):
+    """Response after AI revises the grading."""
+
+    html_content: str  # The revised HTML content
+    elapsed_ms: Optional[int] = None
+    error: Optional[str] = None
+
+
+class SaveRevisionRequest(BaseModel):
+    """Request to save a revised version as the final graded output."""
+
+    ai_grading_id: int
+    html_content: str  # The revised HTML content to save
+    revision_history: Optional[List[Dict[str, Any]]] = None  # All revision instructions
