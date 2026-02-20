@@ -831,7 +831,6 @@ async def revise_grading(
     """
     from app.schemas.assignment import ReviseGradingResponse
     from app.services.ai_prompts import REVISE_GRADING_PROMPT
-    from app.services.markdown_converter import MarkdownGradingConverter
 
     start_ms = time.perf_counter()
 
@@ -891,7 +890,7 @@ async def revise_grading(
         grading_service = get_ai_grading_service(db)
         response = await grading_service._call_ai(
             prompt=prompt,
-            system_prompt="You are an expert English teacher. Revise the grading output based on the teacher's instruction. Output only the revised markdown content. Do not include JSON or code fences.",
+            system_prompt="You are an expert English teacher. Revise the grading output based on the teacher's instruction. Output only the revised HTML content. Use <span> tags with inline styles for corrections. Do not include markdown, JSON, code fences, or explanations.",
         )
 
         if not response:
@@ -902,18 +901,14 @@ async def revise_grading(
                 elapsed_ms=elapsed,
             ).model_dump()
 
-        markdown = response.strip()
-        # Remove markdown code fences if present
-        if markdown.startswith("```"):
-            first = markdown.find("\n")
+        html_content = response.strip()
+        # Remove HTML code fences if present (cleanup in case AI wraps in code blocks)
+        if html_content.startswith("```"):
+            first = html_content.find("\n")
             if first != -1:
-                markdown = markdown[first + 1 :]
-            if markdown.endswith("```"):
-                markdown = markdown[:-3].strip()
-
-        html_content = MarkdownGradingConverter.markdown_to_html(
-            markdown, include_styling=True
-        )
+                html_content = html_content[first + 1 :]
+            if html_content.endswith("```"):
+                html_content = html_content[:-3].strip()
 
         elapsed = int((time.perf_counter() - start_ms) * 1000)
         return ReviseGradingResponse(

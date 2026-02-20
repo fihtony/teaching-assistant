@@ -143,31 +143,28 @@ REVISE_GRADING_PROMPT = """You are an expert English teacher revising an AI-grad
 {teacher_revise_instruction}
 >>> END of teacher's revision instruction <<<
 
-## CRITICAL: Correction Markup Rules
+## CRITICAL: HTML Correction Markup Rules
 
-You MUST use special markup with DOUBLE BRACES (not single) for all corrections:
+You MUST use HTML span tags to mark all corrections:
 
-1. **Deletions**: ~~deleted text~~
-   - Example: ~~word~~
+1. **Deletions**: <span style="text-decoration: line-through; text-decoration-color: #dc2626; color: #dc2626;">deleted text</span>
+   - Example: <span style="text-decoration: line-through; text-decoration-color: #dc2626; color: #dc2626;">word</span>
 
-2. **Additions**: {{added text}}
-   - Example: {{word}} (use two {{ and two }})
+2. **Additions**: <span style="color: #dc2626;">added text</span>
+   - Example: <span style="color: #dc2626;">word</span>
 
-3. **Replacements**: ~~old~~{{new}}
-   - Example: ~~incorrect~~{{correct}}
+3. **Replacements**: <span style="text-decoration: line-through; text-decoration-color: #dc2626; color: #dc2626;">old</span><span style="color: #dc2626;">new</span>
+   - Example: <span style="text-decoration: line-through; text-decoration-color: #dc2626; color: #dc2626;">incorrect</span><span style="color: #dc2626;">correct</span>
 
-## Supported Markdown Formatting
+## Output Format Rules
 
-You may ONLY use:
-- `~~deleted~~` for deletions
-- `{{added}}` for additions  
-- `~~old~~{{new}}` for replacements
-- `**bold**` for emphasis
-- `*italic*` for emphasis
-- `## Header` for section headers
-- `- bullet` for lists
-
-Do NOT use HTML tags, code fences (```), or single braces.
+- Output ONLY HTML format (NOT markdown)
+- Use HTML tags, NOT markdown symbols
+- Use <span> tags ONLY for corrections with the exact styles shown above
+- Use <p> tags for paragraphs
+- Use <strong> or <em> tags for emphasis if needed
+- Do NOT use markdown syntax (~~, {{, **, *, ##, -, etc.)
+- Do NOT use backticks, code fences, or any code block syntax
 
 ## Context
 
@@ -177,7 +174,7 @@ Do NOT use HTML tags, code fences (```), or single braces.
 
 **Custom Instructions**: {custom_instruction}
 
-## Current Graded Output (HTML format — revise and output as markdown)
+## Current Graded Output (HTML format)
 
 {current_graded_output}
 
@@ -188,9 +185,9 @@ Do NOT use HTML tags, code fences (```), or single braces.
 1. Read the teacher's revision instruction FIRST — it takes HIGHEST PRIORITY.
 2. Revise the current graded output according to the teacher's request.
 3. Keep the overall structure (Revised Essay, Detailed Corrections, Teacher's Comments) UNLESS the teacher asks to change it.
-4. Use the correction markup (~~deletions~~, {{additions}}, ~~old~~{{new}}) in the revised text.
-5. Convert the output to clean markdown (no HTML tags).
-6. Output ONLY the revised markdown content — no JSON, code blocks, or explanations.
+4. Use HTML span tags with the correction styles shown above to mark corrections in the revised text.
+5. Output ONLY HTML content (no markdown, no JSON, no explanations).
+6. Preserve all existing HTML formatting from the current output (paragraphs, line breaks, etc.).
 
-Now revise the graded output according to the teacher's instruction. Output ONLY pure markdown.
+Now revise the graded output according to the teacher's instruction. Output ONLY pure HTML.
 """

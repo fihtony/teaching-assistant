@@ -20,6 +20,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Save, Send, Sparkles, Loader2 } from "lucide-react";
 import { GradedOutputDisplay } from "@/components/common/GradedOutputDisplay";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 
 interface ChatMessage {
   role: "teacher" | "ai";
@@ -46,6 +47,7 @@ export function RevisePage() {
   const [isRevising, setIsRevising] = useState(false);
   const [hasNewVersions, setHasNewVersions] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [showSaveConfirm, setShowSaveConfirm] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -156,16 +158,18 @@ export function RevisePage() {
     }
   }, [inputValue, isRevising, assignment, currentHtml, versions.length]);
 
-  // Handle save
-  const handleSave = useCallback(async () => {
+  // Handle save - show confirmation dialog
+  const handleSaveClick = useCallback(() => {
+    if (!assignment || !currentVersion) return;
+    setShowSaveConfirm(true);
+  }, [assignment, currentVersion]);
+
+  // Handle confirmed save
+  const handleConfirmSave = useCallback(async () => {
     if (!assignment || !currentVersion) return;
 
-    const confirmed = window.confirm(
-      `Save Version ${currentVersionId} as the final graded output?\n\nThis will replace the original grading result. All other versions will be discarded.`,
-    );
-    if (!confirmed) return;
-
     setIsSaving(true);
+    setShowSaveConfirm(false);
     try {
       // Build revision history from chat messages
       const revisionHistory = chatMessages
@@ -191,7 +195,7 @@ export function RevisePage() {
     } finally {
       setIsSaving(false);
     }
-  }, [assignment, currentVersion, currentVersionId, chatMessages, id, navigate, queryClient]);
+  }, [assignment, currentVersion, chatMessages, id, navigate, queryClient]);
 
   // Handle Enter key in textarea
   const handleKeyDown = useCallback(
@@ -233,7 +237,7 @@ export function RevisePage() {
         <h1 className="text-2xl font-bold text-gray-900 flex-1 truncate">
           Revise AI Grading{assignment.title || assignment.essay_topic ? `: ${assignment.title || assignment.essay_topic}` : ""}
         </h1>
-        <Button onClick={handleSave} disabled={!hasNewVersions || isSaving}>
+        <Button onClick={handleSaveClick} disabled={!hasNewVersions || isSaving}>
           {isSaving ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -382,6 +386,19 @@ export function RevisePage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Save confirmation dialog */}
+      <ConfirmDialog
+        open={showSaveConfirm}
+        title="Save Revised Version"
+        description={`Save Version ${currentVersionId} as the final graded output?\n\nThis will replace the original grading result. All other versions will be discarded.`}
+        confirmLabel="Save"
+        cancelLabel="Cancel"
+        isDangerous={false}
+        isLoading={isSaving}
+        onConfirm={handleConfirmSave}
+        onCancel={() => setShowSaveConfirm(false)}
+      />
 
       {/* Progress dialog overlay */}
       {isRevising && (
