@@ -1,6 +1,70 @@
 # English Teaching Assignment Grading System
 
-AI-powered assignment grading for English teachers. Supports multiple question types, auto grading, annotations, and personalized greetings.
+This is a comprehensive AI-powered grading assistant designed specifically for English teachers. The application streamlines the assignment grading workflow by leveraging advanced AI models to provide detailed, personalized feedback on student work.
+
+### Key Features
+
+- **AI-Powered Grading**: Utilizes multiple AI providers (OpenAI, Anthropic, Google Gemini, ZhipuAI, Copilot Bridge) to automatically grade assignments with detailed feedback
+- **Multi-Format Support**: Accepts assignments in TXT, PDF, and Word (.DOCX, .DOC) formats
+- **Customizable Grading Instructions**: Create and manage grading templates with configurable question types and weights
+- **Student Management**: Organize students into groups, track individual progress, and maintain student profiles
+- **Grading History**: Complete history of all graded assignments with search, filter, and sort capabilities
+- **Export Options**: Export graded results to PDF, Word (DOCX), or HTML formats
+- **Personalized Greetings**: Customizable greeting messages based on teacher profile and student information
+- **Background Context**: Add background information to help AI understand assignment context for better grading
+
+### Application Pages
+
+| Page | Description |
+|------|-------------|
+| **Dashboard** | Main landing page with stats overview, file upload, and quick grading actions |
+| **Grading** | Full-featured grading interface with student info and grading options |
+| **Grading Result** | Side-by-side view of student work and AI-graded output with export |
+| **History** | Complete grading history with search, filter, and pagination |
+| **Instructions** | Manage grading templates with question types and weights |
+| **Students** | Manage student groups and individual student profiles |
+| **Settings** | Configure AI provider, teacher profile, and application settings |
+
+---
+
+## Screenshots
+
+### Dashboard
+<img src="images/dashboard.png" alt="Dashboard view showing stats overview, file upload area, and quick actions" style="height: 50vh; object-fit: contain;">
+
+The main landing page displays grading statistics (total graded, pending, this week, needs review), a file upload section for assignments, student selection, background information input, and quick action buttons for navigation.
+
+### Grading Interface
+<img src="images/grading.png" alt="Grading interface with student information and grading options" style="height: 50vh; object-fit: contain;">
+
+The grading page provides a comprehensive interface for AI-powered assessment with student information panel, grading options including template selection and additional instructions, and a content area for pasting text or uploading files.
+
+### Grading Results
+<img src="images/grading-result.png" alt="Grading results showing student homework and AI feedback side by side" style="height: 50vh; object-fit: contain;">
+
+The results page displays the student's original work on the left and the AI-generated graded output on the right, including scores, detailed feedback, and options to revise or export to PDF/Word/HTML.
+
+### History Page
+<img src="images/history.png" alt="History page showing all graded assignments with search and filter" style="height: 50vh; object-fit: contain;">
+
+The history page provides a complete record of all assignments with search functionality, status filtering, sortable columns, pagination, and the ability to delete entries.
+
+### Instructions/Templates
+<img src="images/instructions.png" alt="Instructions page for managing grading templates" style="height: 50vh; object-fit: contain;">
+
+The instructions page allows teachers to create and manage grading templates with customizable question types (Multiple Choice, True/False, Fill in the Blank, Short Answer, Reading Comprehension, Picture Description, Essay), weights, encouragement words, and detailed grading criteria in multiple formats (text, markdown, HTML, JSON).
+
+### Students Management
+<img src="images/students.png" alt="Students management page with groups and student list" style="height: 50vh; object-fit: contain;">
+
+The students page enables organizing students into groups, managing individual student profiles with details like age, gender, grade, vocabulary level, and additional notes for personalized grading context.
+
+### Settings Page
+<img src="images/settings.png" alt="Settings page for AI configuration and teacher profile" style="height: 50vh; object-fit: contain;">
+
+The settings page provides configuration options for teacher profile (name, email, avatar, bio), AI provider settings (OpenAI, Anthropic, Google Gemini, ZhipuAI, Copilot Bridge), model selection, API keys, and search engine preferences.
+
+---
 
 ## Quick Start
 
