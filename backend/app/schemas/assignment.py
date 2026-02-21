@@ -39,6 +39,7 @@ class SourceFormatEnum(str, Enum):
     DOC = "doc"
     IMAGE = "image"
     TXT = "txt"
+    TEXT = "text"
 
 
 class ExportFormat(str, Enum):

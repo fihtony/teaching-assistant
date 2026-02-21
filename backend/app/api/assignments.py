@@ -30,6 +30,7 @@ from app.models import (
     AIGradingStatus,
     Student,
     DEFAULT_TEACHER_ID,
+    SourceFormat,
 )
 from app.schemas import (
     AssignmentUploadResponse,
@@ -246,6 +247,75 @@ async def grade_upload_phase(
         )
     except Exception as e:
         logger.exception("Grade upload phase failed")
+        elapsed = int((time.perf_counter() - start_ms) * 1000)
+        return GradePhaseResponse(phase="upload", error=str(e), elapsed_ms=elapsed)
+
+
+@router.post("/grade/upload-text", response_model=GradePhaseResponse)
+async def grade_upload_text_phase(
+    text_content: str = Form(...),
+    student_id: Optional[int] = Form(None),
+    student_name: Optional[str] = Form(None),
+    background: Optional[str] = Form(None),
+    template_id: Optional[int] = Form(None),
+    instructions: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    """
+    Phase 1 (Text variant): Create assignment + context from pasted text content.
+    Returns assignment_id, context_id for the next phases.
+    """
+    start_ms = time.perf_counter()
+    teacher = ensure_default_teacher(db)
+
+    if not text_content or not text_content.strip():
+        elapsed = int((time.perf_counter() - start_ms) * 1000)
+        return GradePhaseResponse(
+            phase="upload",
+            error="Text content cannot be empty",
+            elapsed_ms=elapsed,
+        )
+
+    try:
+        # Create assignment with text content (no file)
+        assignment = Assignment(
+            teacher_id=teacher.id,
+            student_id=student_id,
+            student_name=student_name,
+            original_filename="[pasted_text]",  # Mark as pasted text submission
+            stored_filename="[pasted_text]",  # Mark as pasted text submission
+            source_format=SourceFormat.TEXT,
+            file_size=len(text_content.encode("utf-8")),
+            status=AssignmentStatus.EXTRACTED,
+            extracted_text=text_content.strip(),
+        )
+        db.add(assignment)
+        db.flush()
+
+        # Create grading context
+        context = GradingContext(
+            assignment_id=assignment.id,
+            template_id=template_id,
+            title=_first_line(text_content),
+            background=(background or "").strip() or None,
+            instructions=(instructions or "").strip() or None,
+        )
+        db.add(context)
+        db.flush()
+        db.commit()
+        db.refresh(assignment)
+        db.refresh(context)
+
+        elapsed = int((time.perf_counter() - start_ms) * 1000)
+        return GradePhaseResponse(
+            phase="upload",
+            assignment_id=assignment.id,
+            context_id=context.id,
+            status=assignment.status.value,
+            elapsed_ms=elapsed,
+        )
+    except Exception as e:
+        logger.exception("Grade upload text phase failed")
         elapsed = int((time.perf_counter() - start_ms) * 1000)
         return GradePhaseResponse(phase="upload", error=str(e), elapsed_ms=elapsed)
 

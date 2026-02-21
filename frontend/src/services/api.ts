@@ -113,6 +113,32 @@ export const assignmentsApi = {
     });
     return response.data;
   },
+
+  gradeUploadTextPhase: async (
+    form: {
+      text_content: string;
+      student_id?: number;
+      student_name?: string;
+      background?: string;
+      template_id?: number;
+      instructions?: string;
+    },
+    signal?: AbortSignal,
+  ): Promise<GradePhaseResponse> => {
+    const formData = new FormData();
+    formData.append("text_content", form.text_content);
+    if (form.student_id != null) formData.append("student_id", String(form.student_id));
+    if (form.student_name) formData.append("student_name", form.student_name);
+    if (form.background) formData.append("background", form.background);
+    if (form.template_id != null) formData.append("template_id", String(form.template_id));
+    if (form.instructions) formData.append("instructions", form.instructions);
+    const response = await api.post("/assignments/grade/upload-text", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+      signal,
+    });
+    return response.data;
+  },
+
   analyzeContextPhase: async (assignmentId: number, signal?: AbortSignal): Promise<GradePhaseResponse> => {
     const response = await api.post(`/assignments/${assignmentId}/grade/analyze-context`, undefined, { signal });
     return response.data;

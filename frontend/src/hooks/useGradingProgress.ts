@@ -94,7 +94,7 @@ export function useGradingProgress(): UseGradingProgressReturn {
     try {
       let assignmentId: string | number;
 
-      // Step 1: Upload (if file provided) or use existing assignment
+      // Step 1: Upload (file or text) or use existing assignment
       if (config.file) {
         setProgressStep("uploading");
         const uploadRes = config.isPreview
@@ -120,6 +120,35 @@ export function useGradingProgress(): UseGradingProgressReturn {
               },
               signal,
             );
+
+        if (cancelledRef.current) return null;
+
+        if (uploadRes.error) {
+          setProgressError(uploadRes.error);
+          setPhaseElapsedMs(uploadRes.elapsed_ms ?? null);
+          return null;
+        }
+
+        setPhaseElapsedMs(uploadRes.elapsed_ms ?? null);
+        if (uploadRes.elapsed_ms != null) {
+          setPhaseTimes((prev) => ({ ...prev, uploading: uploadRes.elapsed_ms as number }));
+        }
+
+        assignmentId = uploadRes.assignment_id!;
+      } else if (config.contentText) {
+        // Text-based submission (pasted essay)
+        setProgressStep("uploading");
+        const uploadRes = await assignmentsApi.gradeUploadTextPhase(
+          {
+            text_content: config.contentText,
+            student_id: config.studentId || undefined,
+            student_name: config.studentName || undefined,
+            background: config.background || undefined,
+            template_id: config.templateId ? Number(config.templateId) : undefined,
+            instructions: config.instructions || undefined,
+          },
+          signal,
+        );
 
         if (cancelledRef.current) return null;
 

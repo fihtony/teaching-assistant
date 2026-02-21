@@ -29,6 +29,7 @@ class SourceFormat(str, Enum):
     DOC = "doc"
     IMAGE = "image"
     TXT = "txt"
+    TEXT = "text"
 
 
 class Assignment(Base):
@@ -44,7 +45,9 @@ class Assignment(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     teacher_id = Column(Integer, ForeignKey("teachers.id"), nullable=False)
     student_id = Column(Integer, ForeignKey("students.id"), nullable=True)
-    student_name = Column(Text, nullable=True)  # Optional; teacher may grade without student profile
+    student_name = Column(
+        Text, nullable=True
+    )  # Optional; teacher may grade without student profile
 
     # File information
     original_filename = Column(String(255), nullable=False)
