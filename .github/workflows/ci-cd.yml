@@ -241,9 +241,10 @@ jobs:
     if: |
       (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-backend == 'true' && needs.determine-build.outputs.build-linux-amd64 == 'true') ||
       (github.event_name == 'pull_request' && needs.determine-build.outputs.build-backend == 'true' && needs.determine-build.outputs.build-linux-amd64 == 'true') ||
-      (github.event_name == 'workflow_dispatch' && needs.read-versions.outputs.backend_version != '' && inputs.build_target != 'frontend' && inputs.platforms != 'darwin-arm64')
+      (github.event_name == 'workflow_dispatch' && needs.read-versions.outputs.backend_version != '' && inputs.build_target != 'frontend' && inputs.platforms != 'darwin-arm64') &&
+      needs.read-versions.outputs.backend_version != ''
     needs: [lint-and-check, determine-build]
-    if: needs.read-versions.outputs.backend_version != ''
+    runs-on: ubuntu-latest
     name: Build Backend (linux/amd64)
     permissions:
       contents: write
@@ -295,9 +296,10 @@ jobs:
     if: |
       (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-backend == 'true' && needs.determine-build.outputs.build-darwin-arm64 == 'true') ||
       (github.event_name == 'pull_request' && needs.determine-build.outputs.build-backend == 'true' && needs.determine-build.outputs.build-darwin-arm64 == 'true') ||
-      (github.event_name == 'workflow_dispatch' && needs.read-versions.outputs.backend_version != '' && inputs.build_target != 'frontend' && inputs.platforms != 'linux-amd64')
+      (github.event_name == 'workflow_dispatch' && needs.read-versions.outputs.backend_version != '' && inputs.build_target != 'frontend' && inputs.platforms != 'linux-amd64') &&
+      needs.read-versions.outputs.backend_version != ''
     needs: [lint-and-check, determine-build]
-    if: needs.read-versions.outputs.backend_version != ''
+    runs-on: ubuntu-latest
     name: Build Backend (darwin/arm64)
     permissions:
       contents: write
@@ -352,9 +354,10 @@ jobs:
     if: |
       (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-frontend == 'true' && needs.determine-build.outputs.build-linux-amd64 == 'true') ||
       (github.event_name == 'pull_request' && needs.determine-build.outputs.build-frontend == 'true' && needs.determine-build.outputs.build-linux-amd64 == 'true') ||
-      (github.event_name == 'workflow_dispatch' && needs.read-versions.outputs.frontend_version != '' && inputs.build_target != 'backend' && inputs.platforms != 'darwin-arm64')
+      (github.event_name == 'workflow_dispatch' && needs.read-versions.outputs.frontend_version != '' && inputs.build_target != 'backend' && inputs.platforms != 'darwin-arm64') &&
+      needs.read-versions.outputs.frontend_version != ''
     needs: [lint-and-check, determine-build]
-    if: needs.read-versions.outputs.frontend_version != ''
+    runs-on: ubuntu-latest
     name: Build Frontend (linux/amd64)
     permissions:
       contents: write
@@ -406,9 +409,10 @@ jobs:
     if: |
       (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-frontend == 'true' && needs.determine-build.outputs.build-darwin-arm64 == 'true') ||
       (github.event_name == 'pull_request' && needs.determine-build.outputs.build-frontend == 'true' && needs.determine-build.outputs.build-darwin-arm64 == 'true') ||
-      (github.event_name == 'workflow_dispatch' && needs.read-versions.outputs.frontend_version != '' && inputs.build_target != 'backend' && inputs.platforms != 'linux-amd64')
+      (github.event_name == 'workflow_dispatch' && needs.read-versions.outputs.frontend_version != '' && inputs.build_target != 'backend' && inputs.platforms != 'linux-amd64') &&
+      needs.read-versions.outputs.frontend_version != ''
     needs: [lint-and-check, determine-build]
-    if: needs.read-versions.outputs.frontend_version != ''
+    runs-on: ubuntu-latest
     name: Build Frontend (darwin/arm64)
     permissions:
       contents: write
