@@ -19,12 +19,12 @@ on:
           - both
         default: 'both'
       backend_version:
-        description: 'Backend version (leave empty to use current from .version.json)'
+        description: 'Backend version (leave empty to use .version.json)'
         required: false
         type: string
         default: ''
       frontend_version:
-        description: 'Frontend version (leave empty to use current from .version.json)'
+        description: 'Frontend version (leave empty to use .version.json)'
         required: false
         type: string
         default: ''
@@ -179,24 +179,26 @@ jobs:
         id: decide
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            # Manual trigger - use workflow inputs
+            # Manual trigger - use workflow inputs directly
             BUILD_TARGET="${{ inputs.build_target }}"
             BUILD_PLATFORMS="${{ inputs.platforms }}"
           else
             # Auto trigger - detect changes
-            BUILD_TARGET="${{ needs.lint-and-check.outputs.backend-changed }}-${{ needs.lint-and-check.outputs.frontend-changed }}"
+            BACKEND_CHANGED="${{ needs.lint-and-check.outputs.backend-changed }}"
+            FRONTEND_CHANGED="${{ needs.lint-and-check.outputs.frontend-changed }}"
             
-            # For push/PR, always build both platforms
-            if [ "$BUILD_TARGET" == "false-false" ]; then
-              BUILD_TARGET="none"
-            elif [ "$BUILD_TARGET" == "true-false" ]; then
-              BUILD_TARGET="backend"
-            elif [ "$BUILD_TARGET" == "false-true" ]; then
-              BUILD_TARGET="frontend"
-            elif [ "$BUILD_TARGET" == "true-true" ]; then
+            # Convert to build target format
+            if [ "$BACKEND_CHANGED" == "true" ] && [ "$FRONTEND_CHANGED" == "true" ]; then
               BUILD_TARGET="both"
+            elif [ "$BACKEND_CHANGED" == "true" ]; then
+              BUILD_TARGET="backend"
+            elif [ "$FRONTEND_CHANGED" == "true" ]; then
+              BUILD_TARGET="frontend"
+            else
+              BUILD_TARGET="none"
             fi
             
+            # For push/PR, always build both platforms
             BUILD_PLATFORMS="both"
           fi
           
