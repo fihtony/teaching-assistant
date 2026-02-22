@@ -241,9 +241,9 @@ jobs:
     if: |
       (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-backend == 'true' && needs.determine-build.outputs.build-linux-amd64 == 'true') ||
       (github.event_name == 'pull_request' && needs.determine-build.outputs.build-backend == 'true' && needs.determine-build.outputs.build-linux-amd64 == 'true') ||
-      (github.event_name == 'workflow_dispatch' && needs.read-versions != '' && inputs.build_target != 'frontend' && inputs.platforms != 'darwin-arm64')
-    needs: [lint-and-check, determine-build, read-versions]
-    runs-on: ubuntu-latest
+      (github.event_name == 'workflow_dispatch' && needs.read-versions.outputs.backend_version != '' && inputs.build_target != 'frontend' && inputs.platforms != 'darwin-arm64')
+    needs: [lint-and-check, determine-build]
+    if: needs.read-versions.outputs.backend_version != ''
     name: Build Backend (linux/amd64)
     permissions:
       contents: write
@@ -295,9 +295,9 @@ jobs:
     if: |
       (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-backend == 'true' && needs.determine-build.outputs.build-darwin-arm64 == 'true') ||
       (github.event_name == 'pull_request' && needs.determine-build.outputs.build-backend == 'true' && needs.determine-build.outputs.build-darwin-arm64 == 'true') ||
-      (github.event_name == 'workflow_dispatch' && needs.read-versions != '' && inputs.build_target != 'frontend' && inputs.platforms != 'linux-amd64')
-    needs: [lint-and-check, determine-build, read-versions]
-    runs-on: ubuntu-latest
+      (github.event_name == 'workflow_dispatch' && needs.read-versions.outputs.backend_version != '' && inputs.build_target != 'frontend' && inputs.platforms != 'linux-amd64')
+    needs: [lint-and-check, determine-build]
+    if: needs.read-versions.outputs.backend_version != ''
     name: Build Backend (darwin/arm64)
     permissions:
       contents: write
@@ -352,9 +352,9 @@ jobs:
     if: |
       (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-frontend == 'true' && needs.determine-build.outputs.build-linux-amd64 == 'true') ||
       (github.event_name == 'pull_request' && needs.determine-build.outputs.build-frontend == 'true' && needs.determine-build.outputs.build-linux-amd64 == 'true') ||
-      (github.event_name == 'workflow_dispatch' && needs.read-versions != '' && inputs.build_target != 'backend' && inputs.platforms != 'darwin-arm64')
-    needs: [lint-and-check, determine-build, read-versions]
-    runs-on: ubuntu-latest
+      (github.event_name == 'workflow_dispatch' && needs.read-versions.outputs.frontend_version != '' && inputs.build_target != 'backend' && inputs.platforms != 'darwin-arm64')
+    needs: [lint-and-check, determine-build]
+    if: needs.read-versions.outputs.frontend_version != ''
     name: Build Frontend (linux/amd64)
     permissions:
       contents: write
@@ -406,9 +406,9 @@ jobs:
     if: |
       (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-frontend == 'true' && needs.determine-build.outputs.build-darwin-arm64 == 'true') ||
       (github.event_name == 'pull_request' && needs.determine-build.outputs.build-frontend == 'true' && needs.determine-build.outputs.build-darwin-arm64 == 'true') ||
-      (github.event_name == 'workflow_dispatch' && needs.read-versions != '' && inputs.build_target != 'backend' && inputs.platforms != 'linux-amd64')
-    needs: [lint-and-check, determine-build, read-versions]
-    runs-on: ubuntu-latest
+      (github.event_name == 'workflow_dispatch' && needs.read-versions.outputs.frontend_version != '' && inputs.build_target != 'backend' && inputs.platforms != 'linux-amd64')
+    needs: [lint-and-check, determine-build]
+    if: needs.read-versions.outputs.frontend_version != ''
     name: Build Frontend (darwin/arm64)
     permissions:
       contents: write
