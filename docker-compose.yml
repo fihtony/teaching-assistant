@@ -10,9 +10,9 @@ services:
       - teaching-network
 
   backend:
-    image: ghcr.io/${REGISTRY_OWNER:-fihtony}/teaching-assistant:backend-${BACKEND_VERSION:-latest}-amd64
+    image: ghcr.io/${REGISTRY_OWNER:-fihtony}/teaching-assistant:backend-${BACKEND_VERSION:-latest}-${PLATFORM:-amd64}
     container_name: teaching-assistant-backend
-    platform: linux/amd64
+    platform: ${PLATFORM_LINUX:-linux/amd64}
     depends_on:
       init:
         condition: service_completed_successfully
@@ -42,9 +42,9 @@ services:
     user: "2000:2000"
 
   frontend:
-    image: ghcr.io/${REGISTRY_OWNER:-fihtony}/teaching-assistant:frontend-${FRONTEND_VERSION:-latest}-amd64
+    image: ghcr.io/${REGISTRY_OWNER:-fihtony}/teaching-assistant:frontend-${FRONTEND_VERSION:-latest}-${PLATFORM:-amd64}
     container_name: teaching-assistant-frontend
-    platform: linux/amd64
+    platform: ${PLATFORM_LINUX:-linux/amd64}
     ports:
       - "${FRONTEND_PORT:-9011}:3090"
     environment:
@@ -75,25 +75,20 @@ networks:
   teaching-network:
     driver: bridge
 
-# Docker Compose Override Files
-# For different platforms, create docker-compose.{platform}.override.yml:
+# Platform Configuration
+# Use PLATFORM environment variable to select which images to use:
 #
-# Example for Apple Silicon (macOS):
-#   docker-compose.darwin-arm64.override.yml:
-#     services:
-#       backend:
-#         image: ghcr.io/fihtony/teaching-assistant:backend-${BACKEND_VERSION:-latest}-darwin-arm64
-#         platform: linux/arm64
-#       frontend:
-#         image: ghcr.io/fihtony/teaching-assistant:frontend-${FRONTEND_VERSION:-latest}-darwin-arm64
-#         platform: linux/arm64
+# For Linux x86_64 (default):
+#   export PLATFORM=amd64
+#   export PLATFORM_LINUX=linux/amd64
+#   docker-compose up -d
 #
-# Example for ARM64 Linux:
-#   docker-compose.arm64.override.yml:
-#     services:
-#       backend:
-#         image: ghcr.io/fihtony/teaching-assistant:backend-${BACKEND_VERSION:-latest}-arm64
-#         platform: linux/arm64
-#       frontend:
-#         image: ghcr.io/fihtony/teaching-assistant:frontend-${FRONTEND_VERSION:-latest}-arm64
-#         platform: linux/arm64
+# For macOS Apple Silicon:
+#   export PLATFORM=darwin-arm64
+#   export PLATFORM_LINUX=linux/arm64
+#   docker-compose up -d
+#
+# For Linux ARM64 (Raspberry Pi, etc):
+#   export PLATFORM=arm64
+#   export PLATFORM_LINUX=linux/arm64
+#   docker-compose up -d

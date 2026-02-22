@@ -17,23 +17,60 @@ on:
           - backend
           - frontend
           - both
+        default: 'both'
       backend_version:
         description: 'Backend version (leave empty to use current from .version.json)'
         required: false
         type: string
+        default: ''
       frontend_version:
         description: 'Frontend version (leave empty to use current from .version.json)'
         required: false
         type: string
+        default: ''
+      platforms:
+        description: 'Which platforms to build'
+        required: true
+        type: choice
+        options:
+          - linux-amd64
+          - darwin-arm64
+          - both
+        default: 'both'
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # Pre-build checks (only on main branch auto push)
+  # Read version from .version.json for workflow dispatch
+  read-versions:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    name: Read Versions
+    outputs:
+      backend_version: ${{ steps.read.outputs.backend_version }}
+      frontend_version: ${{ steps.read.outputs.frontend_version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Read versions
+        id: read
+        run: |
+          # Read current versions from .version.json
+          BACKEND_VERSION=$(grep '"backend"' .version.json | sed -E 's/.*"backend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+          FRONTEND_VERSION=$(grep '"frontend"' .version.json | sed -E 's/.*"frontend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+          
+          echo "backend_version=$BACKEND_VERSION" >> $GITHUB_OUTPUT
+          echo "frontend_version=$FRONTEND_VERSION" >> $GITHUB_OUTPUT
+
+  # Pre-build checks (only on main branch auto push and PR)
   lint-and-check:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     name: Lint, Version & Security Checks
     outputs:
@@ -130,6 +167,8 @@ jobs:
     outputs:
       build-backend: ${{ steps.decide.outputs.backend }}
       build-frontend: ${{ steps.decide.outputs.frontend }}
+      build-linux-amd64: ${{ steps.decide.outputs.build_linux_amd64 }}
+      build-darwin-arm64: ${{ steps.decide.outputs.build_darwin_arm64 }}
     needs: lint-and-check
 
     steps:
@@ -139,22 +178,71 @@ jobs:
       - name: Determine build targets (auto)
         id: decide
         run: |
-          BACKEND_CHANGED="${{ needs.lint-and-check.outputs.backend-changed }}"
-          FRONTEND_CHANGED="${{ needs.lint-and-check.outputs.frontend-changed }}"
-
-          echo "backend=$BACKEND_CHANGED" >> $GITHUB_OUTPUT
-          echo "frontend=$FRONTEND_CHANGED" >> $GITHUB_OUTPUT
-
-          echo "Build targets - Backend: $BACKEND_CHANGED, Frontend: $FRONTEND_CHANGED"
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            # Manual trigger - use workflow inputs
+            BUILD_TARGET="${{ inputs.build_target }}"
+            BUILD_PLATFORMS="${{ inputs.platforms }}"
+          else
+            # Auto trigger - detect changes
+            BUILD_TARGET="${{ needs.lint-and-check.outputs.backend-changed }}-${{ needs.lint-and-check.outputs.frontend-changed }}"
+            
+            # For push/PR, always build both platforms
+            if [ "$BUILD_TARGET" == "false-false" ]; then
+              BUILD_TARGET="none"
+            elif [ "$BUILD_TARGET" == "true-false" ]; then
+              BUILD_TARGET="backend"
+            elif [ "$BUILD_TARGET" == "false-true" ]; then
+              BUILD_TARGET="frontend"
+            elif [ "$BUILD_TARGET" == "true-true" ]; then
+              BUILD_TARGET="both"
+            fi
+            
+            BUILD_PLATFORMS="both"
+          fi
+          
+          # Determine which platforms to build
+          if [ "$BUILD_PLATFORMS" == "linux-amd64" ]; then
+            BUILD_LINUX_AMD64=true
+            BUILD_DARWIN_ARM64=false
+          elif [ "$BUILD_PLATFORMS" == "darwin-arm64" ]; then
+            BUILD_LINUX_AMD64=false
+            BUILD_DARWIN_ARM64=true
+          else
+            BUILD_LINUX_AMD64=true
+            BUILD_DARWIN_ARM64=true
+          fi
+          
+          # Set backend and frontend build flags based on build target
+          if [ "$BUILD_TARGET" == "backend" ] || [ "$BUILD_TARGET" == "both" ]; then
+            BUILD_BACKEND=true
+          else
+            BUILD_BACKEND=false
+          fi
+          
+          if [ "$BUILD_TARGET" == "frontend" ] || [ "$BUILD_TARGET" == "both" ]; then
+            BUILD_FRONTEND=true
+          else
+            BUILD_FRONTEND=false
+          fi
+          
+          echo "backend=$BUILD_BACKEND" >> $GITHUB_OUTPUT
+          echo "frontend=$BUILD_FRONTEND" >> $GITHUB_OUTPUT
+          echo "build_linux_amd64=$BUILD_LINUX_AMD64" >> $GITHUB_OUTPUT
+          echo "build_darwin_arm64=$BUILD_DARWIN_ARM64" >> $GITHUB_OUTPUT
+          
+          echo "Build config:"
+          echo "  Target: $BUILD_TARGET (backend: $BUILD_BACKEND, frontend: $BUILD_FRONTEND)"
+          echo "  Platforms: linux-amd64=$BUILD_LINUX_AMD64, darwin-arm64=$BUILD_DARWIN_ARM64"
 
   # Build and push backend image (linux/amd64)
-  build-backend:
+  build-backend-linux-amd64:
     if: |
-      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-backend == 'true') ||
-      (github.event_name == 'workflow_dispatch' && inputs.build_target != 'frontend')
-    needs: [lint-and-check, determine-build]
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-backend == 'true' && needs.determine-build.outputs.build-linux-amd64 == 'true') ||
+      (github.event_name == 'pull_request' && needs.determine-build.outputs.build-backend == 'true' && needs.determine-build.outputs.build-linux-amd64 == 'true') ||
+      (github.event_name == 'workflow_dispatch' && needs.read-versions != '' && inputs.build_target != 'frontend' && inputs.platforms != 'darwin-arm64')
+    needs: [lint-and-check, determine-build, read-versions]
     runs-on: ubuntu-latest
-    name: Build & Push Backend Image (linux/amd64)
+    name: Build Backend (linux/amd64)
     permissions:
       contents: write
       packages: write
@@ -169,11 +257,14 @@ jobs:
           # Use provided version or read from .version.json
           if [ -n "${{ inputs.backend_version }}" ]; then
             CURRENT_VERSION="${{ inputs.backend_version }}"
+          elif [ "${{ needs.read-versions.outputs.backend_version }}" != '' ]; then
+            CURRENT_VERSION="${{ needs.read-versions.outputs.backend_version }}"
           else
             CURRENT_VERSION=$(grep '"backend"' .version.json | sed -E 's/.*"backend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
           fi
           echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
           echo "new=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "Building backend version: $CURRENT_VERSION for platform: linux/amd64"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -197,14 +288,15 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Build and push backend image (linux/arm64)
-  build-backend-arm64:
+  # Build and push backend image (darwin/arm64)
+  build-backend-darwin-arm64:
     if: |
-      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-backend == 'true') ||
-      (github.event_name == 'workflow_dispatch' && inputs.build_target != 'frontend')
-    needs: [lint-and-check, determine-build]
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-backend == 'true' && needs.determine-build.outputs.build-darwin-arm64 == 'true') ||
+      (github.event_name == 'pull_request' && needs.determine-build.outputs.build-backend == 'true' && needs.determine-build.outputs.build-darwin-arm64 == 'true') ||
+      (github.event_name == 'workflow_dispatch' && needs.read-versions != '' && inputs.build_target != 'frontend' && inputs.platforms != 'linux-amd64')
+    needs: [lint-and-check, determine-build, read-versions]
     runs-on: ubuntu-latest
-    name: Build & Push Backend Image (linux/arm64)
+    name: Build Backend (darwin/arm64)
     permissions:
       contents: write
       packages: write
@@ -222,11 +314,14 @@ jobs:
           # Use provided version or read from .version.json
           if [ -n "${{ inputs.backend_version }}" ]; then
             CURRENT_VERSION="${{ inputs.backend_version }}"
+          elif [ "${{ needs.read-versions.outputs.backend_version }}" != '' ]; then
+            CURRENT_VERSION="${{ needs.read-versions.outputs.backend_version }}"
           else
             CURRENT_VERSION=$(grep '"backend"' .version.json | sed -E 's/.*"backend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
           fi
           echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
           echo "new=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "Building backend version: $CURRENT_VERSION for platform: darwin/arm64"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -250,66 +345,15 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Build and push backend image (macos/apple/silicon)
-  build-backend-macos:
-    if: |
-      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-backend == 'true') ||
-      (github.event_name == 'workflow_dispatch' && inputs.build_target != 'frontend')
-    needs: [lint-and-check, determine-build]
-    runs-on: macos-14
-    name: Build & Push Backend Image (macOS/Apple Silicon)
-    permissions:
-      contents: write
-      packages: write
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver: docker-container
-
-      - name: Read backend version
-        id: version
-        run: |
-          # Use provided version or read from .version.json
-          if [ -n "${{ inputs.backend_version }}" ]; then
-            CURRENT_VERSION="${{ inputs.backend_version }}"
-          else
-            CURRENT_VERSION=$(grep '"backend"' .version.json | sed -E 's/.*"backend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
-          fi
-          echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-          echo "new=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push backend image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./backend
-          push: true
-          platforms: darwin/arm64
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.version.outputs.new }}-darwin-arm64
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-latest-darwin-arm64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
   # Build and push frontend image (linux/amd64)
-  build-frontend:
+  build-frontend-linux-amd64:
     if: |
-      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-frontend == 'true') ||
-      (github.event_name == 'workflow_dispatch' && inputs.build_target != 'backend')
-    needs: [lint-and-check, determine-build]
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-frontend == 'true' && needs.determine-build.outputs.build-linux-amd64 == 'true') ||
+      (github.event_name == 'pull_request' && needs.determine-build.outputs.build-frontend == 'true' && needs.determine-build.outputs.build-linux-amd64 == 'true') ||
+      (github.event_name == 'workflow_dispatch' && needs.read-versions != '' && inputs.build_target != 'backend' && inputs.platforms != 'darwin-arm64')
+    needs: [lint-and-check, determine-build, read-versions]
     runs-on: ubuntu-latest
-    name: Build & Push Frontend Image (linux/amd64)
+    name: Build Frontend (linux/amd64)
     permissions:
       contents: write
       packages: write
@@ -324,11 +368,14 @@ jobs:
           # Use provided version or read from .version.json
           if [ -n "${{ inputs.frontend_version }}" ]; then
             CURRENT_VERSION="${{ inputs.frontend_version }}"
+          elif [ "${{ needs.read-versions.outputs.frontend_version }}" != '' ]; then
+            CURRENT_VERSION="${{ needs.read-versions.outputs.frontend_version }}"
           else
             CURRENT_VERSION=$(grep '"frontend"' .version.json | sed -E 's/.*"frontend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
           fi
           echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
           echo "new=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "Building frontend version: $CURRENT_VERSION for platform: linux/amd64"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -352,14 +399,15 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Build and push frontend image (linux/arm64)
-  build-frontend-arm64:
+  # Build and push frontend image (darwin/arm64)
+  build-frontend-darwin-arm64:
     if: |
-      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-frontend == 'true') ||
-      (github.event_name == 'workflow_dispatch' && inputs.build_target != 'backend')
-    needs: [lint-and-check, determine-build]
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-frontend == 'true' && needs.determine-build.outputs.build-darwin-arm64 == 'true') ||
+      (github.event_name == 'pull_request' && needs.determine-build.outputs.build-frontend == 'true' && needs.determine-build.outputs.build-darwin-arm64 == 'true') ||
+      (github.event_name == 'workflow_dispatch' && needs.read-versions != '' && inputs.build_target != 'backend' && inputs.platforms != 'linux-amd64')
+    needs: [lint-and-check, determine-build, read-versions]
     runs-on: ubuntu-latest
-    name: Build & Push Frontend Image (linux/arm64)
+    name: Build Frontend (darwin/arm64)
     permissions:
       contents: write
       packages: write
@@ -377,11 +425,14 @@ jobs:
           # Use provided version or read from .version.json
           if [ -n "${{ inputs.frontend_version }}" ]; then
             CURRENT_VERSION="${{ inputs.frontend_version }}"
+          elif [ "${{ needs.read-versions.outputs.frontend_version }}" != '' ]; then
+            CURRENT_VERSION="${{ needs.read-versions.outputs.frontend_version }}"
           else
             CURRENT_VERSION=$(grep '"frontend"' .version.json | sed -E 's/.*"frontend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
           fi
           echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
           echo "new=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "Building frontend version: $CURRENT_VERSION for platform: darwin/arm64"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -405,65 +456,13 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Build and push frontend image (macos/apple/silicon)
-  build-frontend-macos:
-    if: |
-      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-frontend == 'true') ||
-      (github.event_name == 'workflow_dispatch' && inputs.build_target != 'backend')
-    needs: [lint-and-check, determine-build]
-    runs-on: macos-14
-    name: Build & Push Frontend Image (macOS/Apple Silicon)
-    permissions:
-      contents: write
-      packages: write
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver: docker-container
-
-      - name: Read frontend version
-        id: version
-        run: |
-          # Use provided version or read from .version.json
-          if [ -n "${{ inputs.frontend_version }}" ]; then
-            CURRENT_VERSION="${{ inputs.frontend_version }}"
-          else
-            CURRENT_VERSION=$(grep '"frontend"' .version.json | sed -E 's/.*"frontend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
-          fi
-          echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-          echo "new=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push frontend image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./frontend
-          push: true
-          platforms: darwin/arm64
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.version.outputs.new }}-darwin-arm64
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-latest-darwin-arm64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  # Create release
+  # Create release (only on push to main)
   create-release:
     if: |
       github.event_name == 'push' && 
       github.ref == 'refs/heads/main' &&
-      (needs.build-backend.result == 'success' || needs.build-frontend.result == 'success')
-    needs: [build-backend, build-frontend]
+      (needs.build-backend-linux-amd64.result == 'success' || needs.build-frontend-linux-amd64.result == 'success')
+    needs: [build-backend-linux-amd64, build-frontend-linux-amd64]
     runs-on: ubuntu-latest
     name: Create GitHub Release
     permissions:
@@ -490,27 +489,27 @@ jobs:
           release_name: Release ${{ steps.versions.outputs.backend }}-${{ steps.versions.outputs.frontend }}
           body: |
             ## Docker Images
-            - Backend (amd64): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.versions.outputs.backend }}-amd64`
-            - Backend (arm64): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.versions.outputs.backend }}-arm64`
-            - Backend (macOS): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.versions.outputs.backend }}-darwin-arm64`
-            - Frontend (amd64): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.versions.outputs.frontend }}-amd64`
-            - Frontend (arm64): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.versions.outputs.frontend }}-arm64`
-            - Frontend (macOS): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.versions.outputs.frontend }}-darwin-arm64`
+            
+            ### Backend
+            - Linux AMD64: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.versions.outputs.backend }}-amd64`
+            - Linux ARM64: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.versions.outputs.backend }}-arm64`
+            
+            ### Frontend
+            - Linux AMD64: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.versions.outputs.frontend }}-amd64`
+            - Linux ARM64: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.versions.outputs.frontend }}-arm64`
 
             ## Latest Tags
-            - Backend Latest (amd64): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-latest`
-            - Backend Latest (arm64): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-latest-arm64`
-            - Backend Latest (macOS): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-latest-darwin-arm64`
-            - Frontend Latest (amd64): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-latest`
-            - Frontend Latest (arm64): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-latest-arm64`
-            - Frontend Latest (macOS): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-latest-darwin-arm64`
+            - Backend Latest (AMD64): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-latest`
+            - Frontend Latest (AMD64): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-latest`
           draft: false
           prerelease: false
 
-  # Test images
+  # Test images (only on push to main)
   test-images:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && (needs.build-backend.result == 'success' || needs.build-frontend.result == 'success')
-    needs: [build-backend, build-frontend]
+    if: |
+      github.event_name == 'push' && github.ref == 'refs/heads/main' && 
+      (needs.build-backend-linux-amd64.result == 'success' || needs.build-frontend-linux-amd64.result == 'success')
+    needs: [build-backend-linux-amd64, build-frontend-linux-amd64]
     runs-on: ubuntu-latest
     name: Test Built Images
     continue-on-error: true
@@ -535,16 +534,13 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Test backend image
-        if: needs.build-backend.result == 'success'
+        if: needs.build-backend-linux-amd64.result == 'success'
         run: |
           docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.versions.outputs.backend }}-amd64
           docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.versions.outputs.backend }}-amd64 python -c "import fastapi; print('✓ FastAPI available')"
 
       - name: Test frontend image
-        if: needs.build-frontend.result == 'success'
+        if: needs.build-frontend-linux-amd64.result == 'success'
         run: |
           docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.versions.outputs.frontend }}-amd64
           docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.versions.outputs.frontend }}-amd64 npm --version > /dev/null && echo "✓ Frontend verified"
-
-      - name: Test docker-compose config
-        run: docker-compose -f docker-compose.yml config > /dev/null && echo "✓ docker-compose valid"
