@@ -159,7 +159,7 @@ jobs:
           echo "new=$NEW_VERSION" >> $GITHUB_OUTPUT
 
           # Update .version.json
-          sed -i "" "s/\"backend\"[[:space:]]*:[[:space:]]*\"[^\"]*\"/\"backend\": \"$NEW_VERSION\"/" .version.json
+          sed -i "s/\"backend\"[[:space:]]*:[[:space:]]*\"[^\"]*\"/\"backend\": \"$NEW_VERSION\"/" .version.json
 
       - name: Commit version update
         run: |
@@ -222,7 +222,7 @@ jobs:
           echo "new=$NEW_VERSION" >> $GITHUB_OUTPUT
 
           # Update .version.json
-          sed -i "" "s/\"frontend\"[[:space:]]*:[[:space:]]*\"[^\"]*\"/\"frontend\": \"$NEW_VERSION\"/" .version.json
+          sed -i "s/\"frontend\"[[:space:]]*:[[:space:]]*\"[^\"]*\"/\"frontend\": \"$NEW_VERSION\"/" .version.json
 
       - name: Commit version update
         run: |
