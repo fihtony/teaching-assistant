@@ -142,31 +142,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Read and update backend version
+      - name: Read backend version
         id: version
         run: |
           # Read current version from .version.json
           CURRENT_VERSION=$(grep '"backend"' .version.json | sed -E 's/.*"backend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
           echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-
-          # Auto increment patch version
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-          NEW_PATCH=$((PATCH + 1))
-          NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
-          echo "new=$NEW_VERSION" >> $GITHUB_OUTPUT
-
-          # Update .version.json
-          sed -i "s/\"backend\"[[:space:]]*:[[:space:]]*\"[^\"]*\"/\"backend\": \"$NEW_VERSION\"/" .version.json
-
-      - name: Commit version update
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .version.json
-          git commit -m "chore(backend): version bump ${{ steps.version.outputs.current }} → ${{ steps.version.outputs.new }}" || true
+          echo "new=$CURRENT_VERSION" >> $GITHUB_OUTPUT
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -189,9 +172,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Push version commit
-        run: git push origin main || true
-
   # Build and push frontend image
   build-frontend:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-frontend == 'true'
@@ -205,31 +185,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Read and update frontend version
+      - name: Read frontend version
         id: version
         run: |
           # Read current version from .version.json
           CURRENT_VERSION=$(grep '"frontend"' .version.json | sed -E 's/.*"frontend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
           echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-
-          # Auto increment patch version
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-          NEW_PATCH=$((PATCH + 1))
-          NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
-          echo "new=$NEW_VERSION" >> $GITHUB_OUTPUT
-
-          # Update .version.json
-          sed -i "s/\"frontend\"[[:space:]]*:[[:space:]]*\"[^\"]*\"/\"frontend\": \"$NEW_VERSION\"/" .version.json
-
-      - name: Commit version update
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .version.json
-          git commit -m "chore(frontend): version bump ${{ steps.version.outputs.current }} → ${{ steps.version.outputs.new }}" || true
+          echo "new=$CURRENT_VERSION" >> $GITHUB_OUTPUT
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -251,9 +214,6 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Push version commit
-        run: git push origin main || true
 
   # Create release
   create-release:
