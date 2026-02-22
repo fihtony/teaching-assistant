@@ -7,6 +7,24 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      build_target:
+        description: 'Which project to build'
+        required: true
+        type: choice
+        options:
+          - backend
+          - frontend
+          - both
+      backend_version:
+        description: 'Backend version (leave empty to use current from .version.json)'
+        required: false
+        type: string
+      frontend_version:
+        description: 'Frontend version (leave empty to use current from .version.json)'
+        required: false
+        type: string
 
 env:
   REGISTRY: ghcr.io
@@ -129,12 +147,14 @@ jobs:
 
           echo "Build targets - Backend: $BACKEND_CHANGED, Frontend: $FRONTEND_CHANGED"
 
-  # Build and push backend image
+  # Build and push backend image (linux/amd64)
   build-backend:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-backend == 'true'
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-backend == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.build_target != 'frontend')
     needs: [lint-and-check, determine-build]
     runs-on: ubuntu-latest
-    name: Build & Push Backend Image
+    name: Build & Push Backend Image (linux/amd64)
     permissions:
       contents: write
       packages: write
@@ -146,8 +166,12 @@ jobs:
       - name: Read backend version
         id: version
         run: |
-          # Read current version from .version.json
-          CURRENT_VERSION=$(grep '"backend"' .version.json | sed -E 's/.*"backend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+          # Use provided version or read from .version.json
+          if [ -n "${{ inputs.backend_version }}" ]; then
+            CURRENT_VERSION="${{ inputs.backend_version }}"
+          else
+            CURRENT_VERSION=$(grep '"backend"' .version.json | sed -E 's/.*"backend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+          fi
           echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
           echo "new=$CURRENT_VERSION" >> $GITHUB_OUTPUT
 
@@ -165,19 +189,127 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./backend
+          platforms: linux/amd64
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.version.outputs.new }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.version.outputs.new }}-amd64
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Build and push frontend image
-  build-frontend:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-frontend == 'true'
+  # Build and push backend image (linux/arm64)
+  build-backend-arm64:
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-backend == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.build_target != 'frontend')
     needs: [lint-and-check, determine-build]
     runs-on: ubuntu-latest
-    name: Build & Push Frontend Image
+    name: Build & Push Backend Image (linux/arm64)
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Read backend version
+        id: version
+        run: |
+          # Use provided version or read from .version.json
+          if [ -n "${{ inputs.backend_version }}" ]; then
+            CURRENT_VERSION="${{ inputs.backend_version }}"
+          else
+            CURRENT_VERSION=$(grep '"backend"' .version.json | sed -E 's/.*"backend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+          fi
+          echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "new=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.version.outputs.new }}-arm64
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-latest-arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Build and push backend image (macos/apple/silicon)
+  build-backend-macos:
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-backend == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.build_target != 'frontend')
+    needs: [lint-and-check, determine-build]
+    runs-on: macos-14
+    name: Build & Push Backend Image (macOS/Apple Silicon)
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+
+      - name: Read backend version
+        id: version
+        run: |
+          # Use provided version or read from .version.json
+          if [ -n "${{ inputs.backend_version }}" ]; then
+            CURRENT_VERSION="${{ inputs.backend_version }}"
+          else
+            CURRENT_VERSION=$(grep '"backend"' .version.json | sed -E 's/.*"backend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+          fi
+          echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "new=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          platforms: darwin/arm64
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.version.outputs.new }}-darwin-arm64
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-latest-darwin-arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Build and push frontend image (linux/amd64)
+  build-frontend:
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-frontend == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.build_target != 'backend')
+    needs: [lint-and-check, determine-build]
+    runs-on: ubuntu-latest
+    name: Build & Push Frontend Image (linux/amd64)
     permissions:
       contents: write
       packages: write
@@ -189,8 +321,12 @@ jobs:
       - name: Read frontend version
         id: version
         run: |
-          # Read current version from .version.json
-          CURRENT_VERSION=$(grep '"frontend"' .version.json | sed -E 's/.*"frontend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+          # Use provided version or read from .version.json
+          if [ -n "${{ inputs.frontend_version }}" ]; then
+            CURRENT_VERSION="${{ inputs.frontend_version }}"
+          else
+            CURRENT_VERSION=$(grep '"frontend"' .version.json | sed -E 's/.*"frontend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+          fi
           echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
           echo "new=$CURRENT_VERSION" >> $GITHUB_OUTPUT
 
@@ -208,10 +344,116 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
+          platforms: linux/amd64
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.version.outputs.new }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.version.outputs.new }}-amd64
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Build and push frontend image (linux/arm64)
+  build-frontend-arm64:
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-frontend == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.build_target != 'backend')
+    needs: [lint-and-check, determine-build]
+    runs-on: ubuntu-latest
+    name: Build & Push Frontend Image (linux/arm64)
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Read frontend version
+        id: version
+        run: |
+          # Use provided version or read from .version.json
+          if [ -n "${{ inputs.frontend_version }}" ]; then
+            CURRENT_VERSION="${{ inputs.frontend_version }}"
+          else
+            CURRENT_VERSION=$(grep '"frontend"' .version.json | sed -E 's/.*"frontend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+          fi
+          echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "new=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.version.outputs.new }}-arm64
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-latest-arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Build and push frontend image (macos/apple/silicon)
+  build-frontend-macos:
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-frontend == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.build_target != 'backend')
+    needs: [lint-and-check, determine-build]
+    runs-on: macos-14
+    name: Build & Push Frontend Image (macOS/Apple Silicon)
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+
+      - name: Read frontend version
+        id: version
+        run: |
+          # Use provided version or read from .version.json
+          if [ -n "${{ inputs.frontend_version }}" ]; then
+            CURRENT_VERSION="${{ inputs.frontend_version }}"
+          else
+            CURRENT_VERSION=$(grep '"frontend"' .version.json | sed -E 's/.*"frontend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+          fi
+          echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "new=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          platforms: darwin/arm64
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.version.outputs.new }}-darwin-arm64
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-latest-darwin-arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -248,12 +490,20 @@ jobs:
           release_name: Release ${{ steps.versions.outputs.backend }}-${{ steps.versions.outputs.frontend }}
           body: |
             ## Docker Images
-            - Backend: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.versions.outputs.backend }}`
-            - Frontend: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.versions.outputs.frontend }}`
+            - Backend (amd64): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.versions.outputs.backend }}-amd64`
+            - Backend (arm64): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.versions.outputs.backend }}-arm64`
+            - Backend (macOS): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.versions.outputs.backend }}-darwin-arm64`
+            - Frontend (amd64): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.versions.outputs.frontend }}-amd64`
+            - Frontend (arm64): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.versions.outputs.frontend }}-arm64`
+            - Frontend (macOS): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.versions.outputs.frontend }}-darwin-arm64`
 
             ## Latest Tags
-            - Backend Latest: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-latest`
-            - Frontend Latest: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-latest`
+            - Backend Latest (amd64): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-latest`
+            - Backend Latest (arm64): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-latest-arm64`
+            - Backend Latest (macOS): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-latest-darwin-arm64`
+            - Frontend Latest (amd64): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-latest`
+            - Frontend Latest (arm64): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-latest-arm64`
+            - Frontend Latest (macOS): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-latest-darwin-arm64`
           draft: false
           prerelease: false
 
@@ -287,14 +537,14 @@ jobs:
       - name: Test backend image
         if: needs.build-backend.result == 'success'
         run: |
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.versions.outputs.backend }}
-          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.versions.outputs.backend }} python -c "import fastapi; print('✓ FastAPI available')"
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.versions.outputs.backend }}-amd64
+          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.versions.outputs.backend }}-amd64 python -c "import fastapi; print('✓ FastAPI available')"
 
       - name: Test frontend image
         if: needs.build-frontend.result == 'success'
         run: |
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.versions.outputs.frontend }}
-          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.versions.outputs.frontend }} npm --version > /dev/null && echo "✓ Frontend verified"
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.versions.outputs.frontend }}-amd64
+          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.versions.outputs.frontend }}-amd64 npm --version > /dev/null && echo "✓ Frontend verified"
 
       - name: Test docker-compose config
         run: docker-compose -f docker-compose.yml config > /dev/null && echo "✓ docker-compose valid"

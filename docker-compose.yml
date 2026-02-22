@@ -8,9 +8,11 @@ services:
     command: sh -c "mkdir -p /app/data /app/logs && echo 'Folders initialized'"
     networks:
       - teaching-network
+
   backend:
-    image: ghcr.io/${REGISTRY_OWNER}/teaching-assistant:backend-${BACKEND_VERSION}
+    image: ghcr.io/${REGISTRY_OWNER:-fihtony}/teaching-assistant:backend-${BACKEND_VERSION:-latest}-amd64
     container_name: teaching-assistant-backend
+    platform: linux/amd64
     depends_on:
       init:
         condition: service_completed_successfully
@@ -20,8 +22,8 @@ services:
       - DATA_DIR=/app/data
       - LOGS_DIR=/app/logs
     volumes:
-      - ${DATA_PATH}:/app/data
-      - ${LOGS_PATH}:/app/logs
+      - ${DATA_PATH:-./data}:/app/data
+      - ${LOGS_PATH:-./logs}:/app/logs
     healthcheck:
       test:
         [
@@ -40,10 +42,11 @@ services:
     user: "2000:2000"
 
   frontend:
-    image: ghcr.io/${REGISTRY_OWNER}/teaching-assistant:frontend-${FRONTEND_VERSION}
+    image: ghcr.io/${REGISTRY_OWNER:-fihtony}/teaching-assistant:frontend-${FRONTEND_VERSION:-latest}-amd64
     container_name: teaching-assistant-frontend
+    platform: linux/amd64
     ports:
-      - "9011:3090"
+      - "${FRONTEND_PORT:-9011}:3090"
     environment:
       - REACT_APP_API_URL=http://backend:8090
     depends_on:
@@ -71,3 +74,26 @@ services:
 networks:
   teaching-network:
     driver: bridge
+
+# Docker Compose Override Files
+# For different platforms, create docker-compose.{platform}.override.yml:
+#
+# Example for Apple Silicon (macOS):
+#   docker-compose.darwin-arm64.override.yml:
+#     services:
+#       backend:
+#         image: ghcr.io/fihtony/teaching-assistant:backend-${BACKEND_VERSION:-latest}-darwin-arm64
+#         platform: linux/arm64
+#       frontend:
+#         image: ghcr.io/fihtony/teaching-assistant:frontend-${FRONTEND_VERSION:-latest}-darwin-arm64
+#         platform: linux/arm64
+#
+# Example for ARM64 Linux:
+#   docker-compose.arm64.override.yml:
+#     services:
+#       backend:
+#         image: ghcr.io/fihtony/teaching-assistant:backend-${BACKEND_VERSION:-latest}-arm64
+#         platform: linux/arm64
+#       frontend:
+#         image: ghcr.io/fihtony/teaching-assistant:frontend-${FRONTEND_VERSION:-latest}-arm64
+#         platform: linux/arm64
