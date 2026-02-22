@@ -43,9 +43,8 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # Read version from .version.json for workflow dispatch
+  # Read version from .version.json (runs for all events)
   read-versions:
-    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     name: Read Versions
     outputs:
@@ -161,7 +160,6 @@ jobs:
 
   # Determine what to build (auto or manual)
   determine-build:
-    if: always()
     runs-on: ubuntu-latest
     name: Determine Build Targets
     outputs:
@@ -169,13 +167,14 @@ jobs:
       build-frontend: ${{ steps.decide.outputs.frontend }}
       build-linux-amd64: ${{ steps.decide.outputs.build_linux_amd64 }}
       build-darwin-arm64: ${{ steps.decide.outputs.build_darwin_arm64 }}
-    needs: lint-and-check
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Determine build targets (auto)
+      - name: Determine build targets
         id: decide
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
@@ -183,10 +182,20 @@ jobs:
             BUILD_TARGET="${{ inputs.build_target }}"
             BUILD_PLATFORMS="${{ inputs.platforms }}"
           else
-            # Auto trigger - detect changes
-            BACKEND_CHANGED="${{ needs.lint-and-check.outputs.backend-changed }}"
-            FRONTEND_CHANGED="${{ needs.lint-and-check.outputs.frontend-changed }}"
+            # Auto trigger - detect changes directly here
+            if git diff --name-only HEAD~1 | grep -q "^backend/"; then
+              BACKEND_CHANGED=true
+            else
+              BACKEND_CHANGED=false
+            fi
+
+            if git diff --name-only HEAD~1 | grep -q "^frontend/"; then
+              FRONTEND_CHANGED=true
+            else
+              FRONTEND_CHANGED=false
+            fi
             
+
             # Convert to build target format
             if [ "$BACKEND_CHANGED" == "true" ] && [ "$FRONTEND_CHANGED" == "true" ]; then
               BUILD_TARGET="both"
@@ -197,7 +206,7 @@ jobs:
             else
               BUILD_TARGET="none"
             fi
-            
+
             # For push/PR, always build both platforms
             BUILD_PLATFORMS="both"
           fi
@@ -239,11 +248,9 @@ jobs:
   # Build and push backend image (linux/amd64)
   build-backend-linux-amd64:
     if: |
-      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-backend == 'true' && needs.determine-build.outputs.build-linux-amd64 == 'true') ||
-      (github.event_name == 'pull_request' && needs.determine-build.outputs.build-backend == 'true' && needs.determine-build.outputs.build-linux-amd64 == 'true') ||
-      (github.event_name == 'workflow_dispatch' && needs.read-versions.outputs.backend_version != '' && inputs.build_target != 'frontend' && inputs.platforms != 'darwin-arm64') &&
-      needs.read-versions.outputs.backend_version != ''
-    needs: [lint-and-check, determine-build]
+      needs.determine-build.outputs.build-backend == 'true' &&
+      needs.determine-build.outputs.build-linux-amd64 == 'true'
+    needs: [determine-build, read-versions]
     runs-on: ubuntu-latest
     name: Build Backend (linux/amd64)
     permissions:
@@ -294,11 +301,9 @@ jobs:
   # Build and push backend image (darwin/arm64)
   build-backend-darwin-arm64:
     if: |
-      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-backend == 'true' && needs.determine-build.outputs.build-darwin-arm64 == 'true') ||
-      (github.event_name == 'pull_request' && needs.determine-build.outputs.build-backend == 'true' && needs.determine-build.outputs.build-darwin-arm64 == 'true') ||
-      (github.event_name == 'workflow_dispatch' && needs.read-versions.outputs.backend_version != '' && inputs.build_target != 'frontend' && inputs.platforms != 'linux-amd64') &&
-      needs.read-versions.outputs.backend_version != ''
-    needs: [lint-and-check, determine-build]
+      needs.determine-build.outputs.build-backend == 'true' &&
+      needs.determine-build.outputs.build-darwin-arm64 == 'true'
+    needs: [determine-build, read-versions]
     runs-on: ubuntu-latest
     name: Build Backend (darwin/arm64)
     permissions:
@@ -352,11 +357,9 @@ jobs:
   # Build and push frontend image (linux/amd64)
   build-frontend-linux-amd64:
     if: |
-      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-frontend == 'true' && needs.determine-build.outputs.build-linux-amd64 == 'true') ||
-      (github.event_name == 'pull_request' && needs.determine-build.outputs.build-frontend == 'true' && needs.determine-build.outputs.build-linux-amd64 == 'true') ||
-      (github.event_name == 'workflow_dispatch' && needs.read-versions.outputs.frontend_version != '' && inputs.build_target != 'backend' && inputs.platforms != 'darwin-arm64') &&
-      needs.read-versions.outputs.frontend_version != ''
-    needs: [lint-and-check, determine-build]
+      needs.determine-build.outputs.build-frontend == 'true' &&
+      needs.determine-build.outputs.build-linux-amd64 == 'true'
+    needs: [determine-build, read-versions]
     runs-on: ubuntu-latest
     name: Build Frontend (linux/amd64)
     permissions:
@@ -407,11 +410,9 @@ jobs:
   # Build and push frontend image (darwin/arm64)
   build-frontend-darwin-arm64:
     if: |
-      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.determine-build.outputs.build-frontend == 'true' && needs.determine-build.outputs.build-darwin-arm64 == 'true') ||
-      (github.event_name == 'pull_request' && needs.determine-build.outputs.build-frontend == 'true' && needs.determine-build.outputs.build-darwin-arm64 == 'true') ||
-      (github.event_name == 'workflow_dispatch' && needs.read-versions.outputs.frontend_version != '' && inputs.build_target != 'backend' && inputs.platforms != 'linux-amd64') &&
-      needs.read-versions.outputs.frontend_version != ''
-    needs: [lint-and-check, determine-build]
+      needs.determine-build.outputs.build-frontend == 'true' &&
+      needs.determine-build.outputs.build-darwin-arm64 == 'true'
+    needs: [determine-build, read-versions]
     runs-on: ubuntu-latest
     name: Build Frontend (darwin/arm64)
     permissions:
