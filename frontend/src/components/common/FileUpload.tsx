@@ -22,6 +22,7 @@ interface FileUploadProps {
 }
 
 /** Build a short label from accept map, e.g. "TXT, PDF, DOCX" */
+// eslint-disable-next-line react-refresh/only-export-components
 export function getAcceptedFormatsLabel(accept: Record<string, string[]>): string {
   const exts = new Set<string>();
   Object.values(accept).forEach((arr) => arr.forEach((e) => exts.add(e)));
