@@ -1,6 +1,7 @@
 # Backend Dockerfile for Teaching Assistant Grading System
+# Optimized for smaller image size
 
-# Build stage (optional for Python, but good for security scanning)
+# Build stage
 FROM python:3.12-slim as builder
 
 WORKDIR /app
@@ -8,26 +9,36 @@ WORKDIR /app
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    && rm -rf /var/lib/apt/lists/*
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
-COPY requirements.txt .
-RUN pip install --user --no-cache-dir -r requirements.txt
+# Install poppler-utils for pdf2image (needed in production too)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    poppler-utils \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+COPY requirements-prod.txt .
+RUN pip install --no-cache-dir --user -r requirements-prod.txt
 
 # Runtime stage
 FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install runtime dependencies only
+# Install only essential runtime dependencies
+# poppler-utils for pdf2image
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libopenblas0 \
-    libgomp1 \
-    && rm -rf /var/lib/apt/lists/*
+    poppler-utils \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
-# Create non-root user (check if exists first to avoid conflicts)
-RUN useradd -m -u 2000 appuser || true
+# Create non-root user
+RUN useradd -m -u 2000 appuser
 
-# Copy Python packages from builder
+# Copy Python packages from builder (without build artifacts)
 COPY --from=builder /root/.local /home/appuser/.local
 
 # Copy application code
