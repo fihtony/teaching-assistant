@@ -43,11 +43,8 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # Pre-build checks (only on main branch auto push and PR)
+  # Pre-build checks (auto push, PR, and manual trigger)
   lint-and-check:
-    if: |
-      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-      github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     name: Lint, Version & Security Checks
     outputs:
