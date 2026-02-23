@@ -2,7 +2,7 @@
 # Optimized for smaller image size
 
 # Build stage
-FROM python:3.12-slim as builder
+FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
@@ -19,8 +19,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-COPY requirements-prod.txt .
-RUN pip install --no-cache-dir --user -r requirements-prod.txt
+# Use requirements-prod.txt if exists, otherwise fallback to requirements.txt
+COPY requirements*.txt ./
+RUN if [ -f requirements-prod.txt ]; then \
+        pip install --no-cache-dir --user -r requirements-prod.txt; \
+    else \
+        pip install --no-cache-dir --user -r requirements.txt; \
+    fi
 
 # Runtime stage
 FROM python:3.12-slim
