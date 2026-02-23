@@ -43,28 +43,6 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # Read version from .version.json (runs for all events)
-  read-versions:
-    runs-on: ubuntu-latest
-    name: Read Versions
-    outputs:
-      backend_version: ${{ steps.read.outputs.backend_version }}
-      frontend_version: ${{ steps.read.outputs.frontend_version }}
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Read versions
-        id: read
-        run: |
-          # Read current versions from .version.json
-          BACKEND_VERSION=$(grep '"backend"' .version.json | sed -E 's/.*"backend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
-          FRONTEND_VERSION=$(grep '"frontend"' .version.json | sed -E 's/.*"frontend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
-          
-          echo "backend_version=$BACKEND_VERSION" >> $GITHUB_OUTPUT
-          echo "frontend_version=$FRONTEND_VERSION" >> $GITHUB_OUTPUT
-
   # Pre-build checks (only on main branch auto push and PR)
   lint-and-check:
     if: |
@@ -161,6 +139,7 @@ jobs:
   # Determine what to build (auto or manual)
   determine-build:
     runs-on: ubuntu-latest
+    needs: [lint-and-check]
     name: Determine Build Targets
     outputs:
       build-backend: ${{ steps.decide.outputs.backend }}
@@ -250,7 +229,7 @@ jobs:
     if: |
       needs.determine-build.outputs.build-backend == 'true' &&
       needs.determine-build.outputs.build-linux-amd64 == 'true'
-    needs: [determine-build, read-versions]
+    needs: [determine-build]
     runs-on: ubuntu-latest
     name: Build Backend (linux/amd64)
     permissions:
@@ -267,8 +246,6 @@ jobs:
           # Use provided version or read from .version.json
           if [ -n "${{ inputs.backend_version }}" ]; then
             CURRENT_VERSION="${{ inputs.backend_version }}"
-          elif [ "${{ needs.read-versions.outputs.backend_version }}" != '' ]; then
-            CURRENT_VERSION="${{ needs.read-versions.outputs.backend_version }}"
           else
             CURRENT_VERSION=$(grep '"backend"' .version.json | sed -E 's/.*"backend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
           fi
@@ -303,7 +280,7 @@ jobs:
     if: |
       needs.determine-build.outputs.build-backend == 'true' &&
       needs.determine-build.outputs.build-darwin-arm64 == 'true'
-    needs: [determine-build, read-versions]
+    needs: [determine-build]
     runs-on: ubuntu-latest
     name: Build Backend (darwin/arm64)
     permissions:
@@ -323,8 +300,6 @@ jobs:
           # Use provided version or read from .version.json
           if [ -n "${{ inputs.backend_version }}" ]; then
             CURRENT_VERSION="${{ inputs.backend_version }}"
-          elif [ "${{ needs.read-versions.outputs.backend_version }}" != '' ]; then
-            CURRENT_VERSION="${{ needs.read-versions.outputs.backend_version }}"
           else
             CURRENT_VERSION=$(grep '"backend"' .version.json | sed -E 's/.*"backend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
           fi
@@ -359,7 +334,7 @@ jobs:
     if: |
       needs.determine-build.outputs.build-frontend == 'true' &&
       needs.determine-build.outputs.build-linux-amd64 == 'true'
-    needs: [determine-build, read-versions]
+    needs: [determine-build]
     runs-on: ubuntu-latest
     name: Build Frontend (linux/amd64)
     permissions:
@@ -376,8 +351,6 @@ jobs:
           # Use provided version or read from .version.json
           if [ -n "${{ inputs.frontend_version }}" ]; then
             CURRENT_VERSION="${{ inputs.frontend_version }}"
-          elif [ "${{ needs.read-versions.outputs.frontend_version }}" != '' ]; then
-            CURRENT_VERSION="${{ needs.read-versions.outputs.frontend_version }}"
           else
             CURRENT_VERSION=$(grep '"frontend"' .version.json | sed -E 's/.*"frontend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
           fi
@@ -412,7 +385,7 @@ jobs:
     if: |
       needs.determine-build.outputs.build-frontend == 'true' &&
       needs.determine-build.outputs.build-darwin-arm64 == 'true'
-    needs: [determine-build, read-versions]
+    needs: [determine-build]
     runs-on: ubuntu-latest
     name: Build Frontend (darwin/arm64)
     permissions:
@@ -432,8 +405,6 @@ jobs:
           # Use provided version or read from .version.json
           if [ -n "${{ inputs.frontend_version }}" ]; then
             CURRENT_VERSION="${{ inputs.frontend_version }}"
-          elif [ "${{ needs.read-versions.outputs.frontend_version }}" != '' ]; then
-            CURRENT_VERSION="${{ needs.read-versions.outputs.frontend_version }}"
           else
             CURRENT_VERSION=$(grep '"frontend"' .version.json | sed -E 's/.*"frontend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
           fi
@@ -462,92 +433,3 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-latest-arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-  # Create release (only on push to main)
-  create-release:
-    if: |
-      github.event_name == 'push' && 
-      github.ref == 'refs/heads/main' &&
-      (needs.build-backend-linux-amd64.result == 'success' || needs.build-frontend-linux-amd64.result == 'success')
-    needs: [build-backend-linux-amd64, build-frontend-linux-amd64]
-    runs-on: ubuntu-latest
-    name: Create GitHub Release
-    permissions:
-      contents: write
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Read versions
-        id: versions
-        run: |
-          BACKEND_VERSION=$(grep '"backend"' .version.json | sed -E 's/.*"backend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
-          FRONTEND_VERSION=$(grep '"frontend"' .version.json | sed -E 's/.*"frontend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
-          echo "backend=$BACKEND_VERSION" >> $GITHUB_OUTPUT
-          echo "frontend=$FRONTEND_VERSION" >> $GITHUB_OUTPUT
-
-      - name: Create Release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: release-${{ github.run_number }}
-          release_name: Release ${{ steps.versions.outputs.backend }}-${{ steps.versions.outputs.frontend }}
-          body: |
-            ## Docker Images
-            
-            ### Backend
-            - Linux AMD64: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.versions.outputs.backend }}-amd64`
-            - Linux ARM64: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.versions.outputs.backend }}-arm64`
-            
-            ### Frontend
-            - Linux AMD64: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.versions.outputs.frontend }}-amd64`
-            - Linux ARM64: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.versions.outputs.frontend }}-arm64`
-
-            ## Latest Tags
-            - Backend Latest (AMD64): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-latest`
-            - Frontend Latest (AMD64): `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-latest`
-          draft: false
-          prerelease: false
-
-  # Test images (only on push to main)
-  test-images:
-    if: |
-      github.event_name == 'push' && github.ref == 'refs/heads/main' && 
-      (needs.build-backend-linux-amd64.result == 'success' || needs.build-frontend-linux-amd64.result == 'success')
-    needs: [build-backend-linux-amd64, build-frontend-linux-amd64]
-    runs-on: ubuntu-latest
-    name: Test Built Images
-    continue-on-error: true
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Read versions
-        id: versions
-        run: |
-          BACKEND_VERSION=$(grep '"backend"' .version.json | sed -E 's/.*"backend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
-          FRONTEND_VERSION=$(grep '"frontend"' .version.json | sed -E 's/.*"frontend"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
-          echo "backend=$BACKEND_VERSION" >> $GITHUB_OUTPUT
-          echo "frontend=$FRONTEND_VERSION" >> $GITHUB_OUTPUT
-
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Test backend image
-        if: needs.build-backend-linux-amd64.result == 'success'
-        run: |
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.versions.outputs.backend }}-amd64
-          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:backend-${{ steps.versions.outputs.backend }}-amd64 python -c "import fastapi; print('✓ FastAPI available')"
-
-      - name: Test frontend image
-        if: needs.build-frontend-linux-amd64.result == 'success'
-        run: |
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.versions.outputs.frontend }}-amd64
-          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:frontend-${{ steps.versions.outputs.frontend }}-amd64 npm --version > /dev/null && echo "✓ Frontend verified"
