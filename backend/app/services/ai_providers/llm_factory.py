@@ -12,6 +12,7 @@ from app.services.ai_providers.llm_anthropic import AnthropicLLMProvider
 from app.services.ai_providers.llm_copilot import CopilotLLMProvider
 from app.services.ai_providers.llm_gemini import GeminiLLMProvider
 from app.services.ai_providers.llm_openai import OpenAILLMProvider
+from app.services.ai_providers.llm_openrouter import OpenRouterLLMProvider
 from app.services.ai_providers.llm_zhipuai import ZhipuAILLMProvider
 
 _LLM_PROVIDER_MAP = {
@@ -22,6 +23,7 @@ _LLM_PROVIDER_MAP = {
     "google": GeminiLLMProvider,
     "gemini": GeminiLLMProvider,
     "copilot": CopilotLLMProvider,
+    "openrouter": OpenRouterLLMProvider,
 }
 
 

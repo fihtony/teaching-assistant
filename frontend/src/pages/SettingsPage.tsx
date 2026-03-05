@@ -344,6 +344,7 @@ export function SettingsPage() {
                     gemini: "https://generativelanguage.googleapis.com/v1beta/openai",
                     zhipuai: "https://open.bigmodel.cn/api/coding/paas/v4",
                     copilot: "http://localhost:1287",
+                    openrouter: "https://openrouter.ai/api/v1",
                   };
 
                   // Check if current base_url is any provider's known default (including old URLs)
@@ -374,6 +375,7 @@ export function SettingsPage() {
                 <option value="google">Google Gemini</option>
                 <option value="zhipuai">ZhipuAI (智谱AI)</option>
                 <option value="copilot">Copilot Bridge</option>
+                <option value="openrouter">OpenRouter</option>
               </select>
             </div>
             <div>
@@ -393,7 +395,9 @@ export function SettingsPage() {
                         ? "https://generativelanguage.googleapis.com/v1beta/openai"
                         : aiConfig.provider === "zhipuai"
                           ? "https://open.bigmodel.cn/api/coding/paas/v4"
-                          : "http://localhost:1287"
+                          : aiConfig.provider === "openrouter"
+                            ? "https://openrouter.ai/api/v1"
+                            : "http://localhost:1287"
                 }
               />
             </div>

@@ -20,6 +20,7 @@ PROVIDER_DEFAULT_BASE_URLS = {
     "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
     "zhipuai": "https://open.bigmodel.cn/api/coding/paas/v4",
     "zhipu": "https://open.bigmodel.cn/api/coding/paas/v4",
+    "openrouter": "https://openrouter.ai/api/v1",
 }
 
 
@@ -90,6 +91,30 @@ async def fetch_models_anthropic(base_url: str, api_key: str) -> List[Union[str,
     return [_normalize_model(m, "Anthropic") for m in raw if m]
 
 
+def _openrouter_model_id(item: Union[str, dict]) -> str:
+    """Return model id for OpenRouter item (string or dict with id/model)."""
+    if isinstance(item, str):
+        return item
+    return (item.get("id") or item.get("model") or "").strip()
+
+
+async def fetch_models_openrouter(base_url: str, api_key: str) -> List[Union[str, dict]]:
+    """OpenRouter: GET https://openrouter.ai/api/v1/models with Bearer token. Returns only models with ':free' in id."""
+    url = f"{base_url.rstrip('/')}/models"
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.get(url, headers=headers)
+        r.raise_for_status()
+        data = r.json()
+    # OpenRouter returns { "data": [ { "id": "openai/gpt-4o", ... } ] } or direct list
+    raw = data if isinstance(data, list) else (data.get("data") or data.get("models") or [])
+    normalized = [_normalize_model(m, "OpenRouter") for m in raw if (isinstance(m, str) or (isinstance(m, dict) and (m.get("id") or m.get("model"))))]
+    # Settings: only show models with ":free" in the model id
+    return [x for x in normalized if ":free" in _openrouter_model_id(x)]
+
+
 def _http_error_message(status_code: int, body: str = "") -> str:
     """Return a user-friendly message for HTTP errors."""
     if status_code == 401:
@@ -127,6 +152,9 @@ async def fetch_models(
     try:
         if provider_lower == "copilot":
             models = await fetch_models_copilot(base_url)
+            return models, None
+        if provider_lower == "openrouter":
+            models = await fetch_models_openrouter(base_url, api_key or "")
             return models, None
         if provider_lower in ("google", "gemini"):
             models = await fetch_models_gemini(base_url, api_key or "")

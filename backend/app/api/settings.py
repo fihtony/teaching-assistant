@@ -41,6 +41,7 @@ PROVIDER_MODELS = {
     "google": [],
     "zhipuai": [],
     "copilot": [],
+    "openrouter": [],
 }
 
 

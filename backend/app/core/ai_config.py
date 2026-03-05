@@ -40,11 +40,17 @@ def get_resolved_ai_config(db: Session) -> Dict[str, Any]:
     cfg = rec.config or {}
     provider = (cfg.get("provider") or "zhipuai").strip().lower()
     model = (cfg.get("model") or "glm-4-flash").strip()
-    base_url = cfg.get("baseUrl") or cfg.get("api_base") or ""
+    base_url = (cfg.get("baseUrl") or cfg.get("api_base") or "").strip().rstrip("/")
     if not base_url and provider in ("zhipuai", "zhipu"):
         base_url = "https://open.bigmodel.cn/api/coding/paas/v4"
     elif not base_url and provider == "openai":
         base_url = "https://api.openai.com/v1"
+    elif provider == "openrouter":
+        # OpenRouter requires base URL to end with /api/v1 (wrong path returns 404)
+        if not base_url or "/api/v1" not in base_url:
+            base_url = "https://openrouter.ai/api/v1"
+        elif not base_url.endswith("/api/v1"):
+            base_url = base_url[: base_url.find("/api/v1") + 7]
 
     api_key = None
     raw_key = cfg.get("api_key")
