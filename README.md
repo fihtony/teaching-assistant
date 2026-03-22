@@ -110,6 +110,44 @@ docker build --tag ghcr.io/$REGISTRY_OWNER/teaching-assistant:frontend-0.1.1 .
 
 ---
 
+## Package Management (GitHub Container Registry)
+
+Docker images are published to [GitHub Container Registry (ghcr.io)](https://ghcr.io). Use `scripts/packages.sh` to inspect and manage published package versions. It requires the [GitHub CLI (`gh`)](https://cli.github.com) to be installed and authenticated.
+
+### View Package Sizes and Versions
+
+```bash
+./scripts/packages.sh list
+```
+
+This lists all published versions with their IDs and creation dates.
+
+To see the **storage size** of each version, visit the Packages page directly:
+
+```
+https://github.com/<your-username>/packages/container/teaching-assistant/versions
+```
+
+### Delete a Specific Version
+
+```bash
+# First, list versions to find the ID
+./scripts/packages.sh list
+
+# Then delete by ID
+./scripts/packages.sh delete <version_id>
+```
+
+### Delete All Untagged (Dangling) Versions
+
+```bash
+./scripts/packages.sh delete-untagged
+```
+
+> **Note:** Deleting a package version is permanent and cannot be undone. Make sure you have the `delete:packages` scope granted for your GitHub token (`gh auth login` → select the scope during login).
+
+---
+
 ## Docker Compose Setup
 
 ### Initialize Environment (macOS)
